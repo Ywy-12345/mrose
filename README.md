@@ -54,7 +54,7 @@ Create the conda environment:
 
 ```bash
 conda env create -f environment.yml
-conda activate DiffRNA
+conda activate mROSE
 ```
 
 Or install the core pip dependencies:
