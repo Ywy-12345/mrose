@@ -1,5 +1,5 @@
 # Generated from the uploaded DiffRNA environment; local prefix removed for portability.
-name: DiffRNA
+name: mROSE
 channels:
 - pytorch
 - defaults
