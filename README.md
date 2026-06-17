@@ -39,6 +39,7 @@ mrose-github-project/
 │   ├── cds_degradation/           # CDS degradation/stability regression
 │   ├── 3utr_rbp/                  # 3′ UTR RBP interaction classification
 │   └── full_length_stability/     # Full-length mRNA stability regression
+├── generation/                    # Sequence generation entry points and demos
 ├── scripts/                       # Import checks and convenience launchers
 ├── docs/                          # Project and manuscript notes
 ├── data/                          # Data placement notes
@@ -88,6 +89,39 @@ bash experiments/full_length_stability/example/run_example.sh
 ```
 
 The example datasets are intentionally small and are included to document file formats, loader expectations and command-line usage. Full training datasets and checkpoints should be stored outside normal Git history.
+
+## Sequence generation
+
+mROSE also includes standalone generation entry points for designing region-specific candidate sequences:
+
+| Region | Script | Output |
+|---|---|---|
+| 5′ UTR | `generation/5utr/generate_5utr.py` | scored 5′ UTR candidates with predicted MRL, MFE, GC and uORF/uAUG features |
+| CDS | `generation/cds/generate_cds.py` | length-matched CDS candidates ranked by model score, CAI, GC and optional MFE |
+| 3′ UTR | `generation/3utr/generate_3utr.py` | scored 3′ UTR candidates with degradation-style prediction, MFE, GC/TC and motif penalties |
+
+Large generation checkpoints are not committed to Git. For local use, place the model files under:
+
+```text
+checkpoints/generation/
+├── 5UTR_Model.pth
+├── CDS_Model.pth
+└── 3UTR_Model.pth
+```
+
+Print demo commands and check local dependencies/checkpoints:
+
+```bash
+python scripts/demo_generate_sequences.py
+```
+
+Run a compact local demo:
+
+```bash
+python scripts/demo_generate_sequences.py --run cds
+```
+
+See [generation/README.md](generation/README.md) for direct commands for 5′ UTR, CDS and 3′ UTR generation.
 
 ## Data and checkpoints
 

@@ -24,6 +24,12 @@
       "path": "experiments/full_length_stability/example/in_solution_half_life",
       "format": "CSV",
       "label": "label"
+    },
+    {
+      "task": "sequence_generation_demo",
+      "path": "generation/examples",
+      "format": "FASTA",
+      "label": "template sequences for 5utr, cds and 3utr generation"
     }
   ]
 }

@@ -49,8 +49,10 @@ The experimental workflow validates mROSE-designed 5′ UTRs, CDSs and 3′ UTRs
 | CDS modeling | `mrose/module_cds.py`, `experiments/cds_degradation/` |
 | 3′ UTR modeling | `mrose/module_3utr.py`, `experiments/3utr_rbp/` |
 | Full-length mRNA fusion | `mrose/full_length_fusion.py`, `experiments/full_length_stability/` |
+| Region-specific generation | `generation/5utr/`, `generation/cds/`, `generation/3utr/` |
 | Data placement notes | `DATA_MANIFEST.md`, `data/README.md` |
 | Quick import check | `scripts/quick_import_check.py` |
+| Generation demo | `scripts/demo_generate_sequences.py` |
 
 ## Important note
 

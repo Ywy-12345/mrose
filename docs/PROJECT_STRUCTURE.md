@@ -20,3 +20,14 @@ Each task folder contains:
 - a local README and runnable wrapper where possible.
 
 Task folders are named by biological region and task type rather than only by model module.
+
+## `generation/`
+
+Standalone candidate-generation scripts:
+
+- `5utr/generate_5utr.py`: 5′ UTR generation and ranking.
+- `cds/generate_cds.py`: CDS generation, amino-acid preservation checks and ranking.
+- `3utr/generate_3utr.py`: 3′ UTR generation and ranking.
+- `examples/`: compact FASTA templates used by `scripts/demo_generate_sequences.py`.
+
+Large generation checkpoints are expected under `checkpoints/generation/` and are excluded from Git history.

@@ -21,6 +21,8 @@ models/
 checkpoints/
 runs/
 wandb/
+generated_*/
+generation/outputs/
 *.pth
 *.pt
 *.ckpt
