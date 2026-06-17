@@ -10,7 +10,14 @@ The scripts were packaged from the local generation bundle and are designed to u
 
 ## Checkpoints
 
-Large checkpoint files are intentionally excluded from Git history. For local generation, place them here:
+The released generation checkpoints are tracked with Git LFS. After cloning the repository, run:
+
+```bash
+git lfs install
+git lfs pull
+```
+
+The files should be present here:
 
 ```text
 checkpoints/generation/
@@ -19,7 +26,13 @@ checkpoints/generation/
 └── 3UTR_Model.pth
 ```
 
-The local update created this folder from `Generate.rar`, but the `.pth` files are ignored by Git because each file is hundreds of megabytes.
+Verify checkpoint integrity:
+
+```bash
+shasum -a 256 -c MODEL_CHECKSUMS.sha256
+```
+
+If Git LFS is not installed, these paths may contain small pointer files instead of the real checkpoints, and generation will fail when PyTorch tries to load them.
 
 ## Demo
 

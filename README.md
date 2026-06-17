@@ -61,6 +61,15 @@ mrose-github-project/
 
 ## Installation
 
+Clone the repository with Git LFS enabled so the generation checkpoints are downloaded correctly:
+
+```bash
+git lfs install
+git clone https://github.com/xiaoshaziydy/mrose.git
+cd mrose
+git lfs pull
+```
+
 Create the conda environment:
 
 ```bash
@@ -98,7 +107,7 @@ bash experiments/3utr_rbp/example/AKAP1_HepG2/run_example.sh
 bash experiments/full_length_stability/example/run_example.sh
 ```
 
-The example datasets are intentionally small and are included to document file formats, loader expectations and command-line usage. Full training datasets and checkpoints should be stored outside normal Git history.
+The example datasets are intentionally small and are included to document file formats, loader expectations and command-line usage. Full training datasets should be stored outside normal Git history.
 
 ## Sequence generation
 
@@ -110,7 +119,7 @@ mROSE also includes standalone generation entry points for designing region-spec
 | CDS | `generation/cds/generate_cds.py` | length-matched CDS candidates ranked by model score, CAI, GC and optional MFE |
 | 3′ UTR | `generation/3utr/generate_3utr.py` | scored 3′ UTR candidates with degradation-style prediction, MFE, GC/TC and motif penalties |
 
-Large generation checkpoints are not committed to Git. For local use, place the model files under:
+The released generation checkpoints are tracked with Git LFS under:
 
 ```text
 checkpoints/generation/
@@ -135,7 +144,13 @@ See [generation/README.md](generation/README.md) for direct commands for 5′ UT
 
 ## Data and checkpoints
 
-Large datasets and model artifacts are not committed to this repository. For full-scale training or release, use one of the following:
+Large training datasets and non-release model artifacts are not committed to this repository. The three generation checkpoints are versioned with Git LFS and can be verified with:
+
+```bash
+shasum -a 256 -c MODEL_CHECKSUMS.sha256
+```
+
+For full-scale training data or additional model releases, use one of the following:
 
 - Git LFS for files that must remain attached to the repository.
 - DVC for reproducible data and model pipelines.

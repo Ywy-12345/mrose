@@ -8,7 +8,7 @@ Large source datasets are excluded from this GitHub-ready repository. Miniature 
 | CDS degradation regression | `experiments/cds_degradation/example/Data/` | `CDS/CoV_Vaccine_Degradation.csv` | `Sequence`, `Value`, `Dataset`, `Split` | The training script consumes `Sequence` and `Value`. |
 | 3′UTR RBP classification | `experiments/3utr_rbp/example/AKAP1_HepG2/` | `3UTR/RNA_protein_interaction/<RBP_cell>/fold*/{train,dev}.fa`, `test.fa` | FASTA header contains `class_0` or `class_1` | Example uses a small AKAP1_HepG2 subset. |
 | Full-length mRNA stability regression | `experiments/full_length_stability/example/in_solution_half_life/` | `Full_lenth/in_solution_half_life/{train,dev,test}.csv` | `sequence`, `label` | The loader segments full transcripts into 5′UTR, CDS and 3′UTR. |
-| Sequence generation | `generation/examples/` | `Generate.rar` local bundle | FASTA template sequences plus region-specific `.pth` checkpoints | Checkpoints are placed under `checkpoints/generation/` locally and ignored by Git. |
+| Sequence generation | `generation/examples/` | `Generate.rar` local bundle | FASTA template sequences plus region-specific `.pth` checkpoints | Released checkpoints are tracked with Git LFS under `checkpoints/generation/`. |
 
 Recommended full-data layout for local training:
 
@@ -20,7 +20,7 @@ data/raw/
 └── full_length_stability/
 ```
 
-Recommended local checkpoint layout for generation:
+Released checkpoint layout for generation:
 
 ```text
 checkpoints/generation/
@@ -29,4 +29,4 @@ checkpoints/generation/
 └── 3UTR_Model.pth
 ```
 
-`data/raw/`, model checkpoints and generated outputs are ignored by `.gitignore`.
+`data/raw/`, non-release model checkpoints and generated outputs are ignored by `.gitignore`. Released generation checkpoints are tracked with Git LFS.
