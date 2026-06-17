@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/mrose-icon.png" alt="mROSE icon" width="180">
+</p>
+
 # mROSE
 
 **mROSE** is a region-aware diffusion framework for optimizing messenger RNA (mRNA) sequences for improved stability and protein expression. The project accompanies the manuscript **"mROSE: mRNA Optimization for Stability and Expression with a diffusion-based generative framework"**.
