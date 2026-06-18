@@ -134,6 +134,8 @@ Print demo commands and check local dependencies/checkpoints:
 python scripts/demo_generate_sequences.py
 ```
 
+For an interactive walkthrough, open [notebooks/mROSE_generation_demo.ipynb](notebooks/mROSE_generation_demo.ipynb) on GitHub or in Jupyter.
+
 Run a compact local demo:
 
 ```bash
