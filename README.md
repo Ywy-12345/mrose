@@ -4,6 +4,8 @@
 
 # mROSE
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20756460.svg)](https://doi.org/10.5281/zenodo.20756460)
+
 **mROSE** is a region-aware diffusion framework for optimizing messenger RNA (mRNA) sequences for improved stability and protein expression. The project accompanies the manuscript **"mROSE: mRNA Optimization for Stability and Expression with a diffusion-based generative framework"**.
 
 mROSE models the three major regulatory regions of an mRNA molecule with region-specific representations:
@@ -146,7 +148,11 @@ See [generation/README.md](generation/README.md) for direct commands for 5′ UT
 
 ## Data and checkpoints
 
-Large training datasets and non-release model artifacts are not committed to this repository. The three generation checkpoints are versioned with Git LFS and can be verified with:
+The full mROSE data and model archive is available on Zenodo:
+
+- **DOI:** [10.5281/zenodo.20756460](https://doi.org/10.5281/zenodo.20756460)
+
+Large training datasets and non-release model artifacts are not committed directly to this repository. The three generation checkpoints required by the demo are versioned with Git LFS and can be verified with:
 
 ```bash
 shasum -a 256 -c MODEL_CHECKSUMS.sha256
@@ -159,7 +165,7 @@ For full-scale training data or additional model releases, use one of the follow
 - Zenodo, Figshare or institutional repositories for citable public datasets.
 - A local `data/raw/` directory ignored by Git.
 
-See [DATA_MANIFEST.md](DATA_MANIFEST.md) for expected dataset locations and schema notes.
+See [DATA_MANIFEST.md](DATA_MANIFEST.md) for expected dataset locations, schema notes and Zenodo archive usage.
 
 ## Project status
 

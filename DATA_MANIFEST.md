@@ -2,6 +2,12 @@
 
 Large source datasets are excluded from this GitHub-ready repository. Miniature examples are included under each experiment folder to document the required schema.
 
+The full mROSE data and model archive is available from Zenodo:
+
+- DOI: [10.5281/zenodo.20756460](https://doi.org/10.5281/zenodo.20756460)
+
+Use the Zenodo archive for full-scale training data, additional model artifacts and reproducible data release records. The table below maps the repository examples to the corresponding source-style data organization.
+
 | Task | Example location | Source-style file(s) | Required columns or labels | Notes |
 |---|---|---|---|---|
 | 5′UTR MRL regression | `experiments/5utr_mrl/example/` | `5UTR/MRL/*_BiologyFeatures.csv` | `utr`, `rl` | The source file includes additional ribosome-loading and biological feature columns. |
@@ -29,4 +35,4 @@ generation/
 └── 3utr/Model.pth
 ```
 
-`data/raw/`, non-release model checkpoints and generated outputs are ignored by `.gitignore`. Released generation checkpoints are tracked with Git LFS.
+`data/raw/`, non-release model checkpoints and generated outputs are ignored by `.gitignore`. Released generation checkpoints are tracked with Git LFS. Full data and model artifacts can be restored from the Zenodo archive above when reproducing large-scale experiments.

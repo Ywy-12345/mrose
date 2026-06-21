@@ -23,6 +23,8 @@ mROSE separates mRNA design into biologically meaningful regions:
 
 This documentation explains how to install the project, run compact examples, use the sequence-generation demos and map the codebase to the manuscript.
 
+The full mROSE data and model archive is available on Zenodo: [10.5281/zenodo.20756460](https://doi.org/10.5281/zenodo.20756460).
+
 ```{toctree}
 :maxdepth: 2
 :caption: User guide
@@ -40,4 +42,5 @@ MANUSCRIPT_OVERVIEW
 :caption: Project links
 
 GitHub repository <https://github.com/xiaoshaziydy/mrose>
+Zenodo data and model archive <https://doi.org/10.5281/zenodo.20756460>
 ```

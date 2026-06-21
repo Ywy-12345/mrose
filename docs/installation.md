@@ -46,3 +46,11 @@ shasum -a 256 -c MODEL_CHECKSUMS.sha256
 ```
 
 If Git LFS is not installed, these paths may contain small pointer files instead of the real checkpoints.
+
+## Full data and model archive
+
+The full mROSE data and model archive is available on Zenodo:
+
+- DOI: [10.5281/zenodo.20756460](https://doi.org/10.5281/zenodo.20756460)
+
+For full-scale experiments, download the Zenodo archive and place large datasets outside normal Git history, for example under `data/raw/`. The repository examples remain intentionally small so they can document file formats and command-line usage.
