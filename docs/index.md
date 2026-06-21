@@ -42,5 +42,6 @@ MANUSCRIPT_OVERVIEW
 :caption: Project links
 
 GitHub repository <https://github.com/xiaoshaziydy/mrose>
+ReadTheDocs documentation <https://mrose.readthedocs.io/>
 Zenodo data and model archive <https://doi.org/10.5281/zenodo.20756460>
 ```

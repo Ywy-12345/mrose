@@ -5,6 +5,9 @@
 # mROSE
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20756460.svg)](https://doi.org/10.5281/zenodo.20756460)
+[![Documentation](https://readthedocs.org/projects/mrose/badge/?version=latest)](https://mrose.readthedocs.io/)
+
+Documentation: [https://mrose.readthedocs.io/](https://mrose.readthedocs.io/)
 
 **mROSE** is a region-aware diffusion framework for optimizing messenger RNA (mRNA) sequences for improved stability and protein expression. The project accompanies the manuscript **"mROSE: mRNA Optimization for Stability and Expression with a diffusion-based generative framework"**.
 
