@@ -52,7 +52,7 @@ The experimental workflow validates mROSE-designed 5′ UTRs, CDSs and 3′ UTRs
 | Region-specific generation | `generation/5utr/`, `generation/cds/`, `generation/3utr/` |
 | Data placement notes | `DATA_MANIFEST.md`, `data/README.md` |
 | Quick import check | `scripts/quick_import_check.py` |
-| Generation demo | `scripts/demo_generate_sequences.py` |
+| Generation example | `scripts/generate_sequences.py` |
 
 ## Important note
 

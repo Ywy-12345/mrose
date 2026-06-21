@@ -54,7 +54,7 @@ mrose-github-project/
 │   ├── cds_degradation/           # CDS degradation/stability regression
 │   ├── 3utr_rbp/                  # 3′ UTR RBP interaction classification
 │   └── full_length_stability/     # Full-length mRNA stability regression
-├── generation/                    # Sequence generation entry points and demos
+├── generation/                    # Sequence generation entry points and examples
 ├── scripts/                       # Import checks and convenience launchers
 ├── docs/                          # Project and manuscript notes
 ├── data/                          # Data placement notes
@@ -133,18 +133,18 @@ generation/
 └── 3utr/Model.pth
 ```
 
-Print demo commands and check local dependencies/checkpoints:
+Print example commands and check local dependencies/checkpoints:
 
 ```bash
-python scripts/demo_generate_sequences.py
+python scripts/generate_sequences.py
 ```
 
-For an interactive walkthrough, open [notebooks/mROSE_generation_demo.ipynb](notebooks/mROSE_generation_demo.ipynb) on GitHub or in Jupyter.
+For an interactive walkthrough, open [notebooks/mROSE_generation.ipynb](notebooks/mROSE_generation.ipynb) on GitHub or in Jupyter.
 
-Run a compact local demo:
+Run a compact local example:
 
 ```bash
-python scripts/demo_generate_sequences.py --run cds
+python scripts/generate_sequences.py --run cds
 ```
 
 See [generation/README.md](generation/README.md) for direct commands for 5′ UTR, CDS and 3′ UTR generation.
@@ -155,7 +155,7 @@ The full mROSE data and model archive is available on Zenodo:
 
 - **DOI:** [10.5281/zenodo.20756460](https://doi.org/10.5281/zenodo.20756460)
 
-Large training datasets and non-release model artifacts are not committed directly to this repository. The three generation checkpoints required by the demo are versioned with Git LFS and can be verified with:
+Large training datasets and non-release model artifacts are not committed directly to this repository. The three generation checkpoints required by the example are versioned with Git LFS and can be verified with:
 
 ```bash
 shasum -a 256 -c MODEL_CHECKSUMS.sha256

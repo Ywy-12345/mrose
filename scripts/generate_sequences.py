@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Demo launcher for mROSE sequence generation.
+"""Generation launcher for mROSE sequence generation.
 
 By default this script prints ready-to-run commands and checks whether local
-checkpoints are available. Use --run to execute one or more generation demos.
+checkpoints are available. Use --run to execute one or more generation examples.
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ TASKS = {
         "script": ROOT / "generation" / "5utr" / "generate_5utr.py",
         "checkpoint": ROOT / "generation" / "5utr" / "Model.pth",
         "input": ROOT / "generation" / "examples" / "5utr_template.fasta",
-        "output_dir": ROOT / "outputs" / "generation" / "5utr_demo",
+        "output_dir": ROOT / "outputs" / "generation" / "5utr_example",
         "args": [
             "--num_samples", "10000",
             "--top_k", "5",
             "--device", "cuda:0",
-            "--output_prefix", "demo_5utr",
+            "--output_prefix", "example_5utr",
         ],
     },
     "cds": {
@@ -36,7 +36,7 @@ TASKS = {
         "script": ROOT / "generation" / "cds" / "generate_cds.py",
         "checkpoint": ROOT / "generation" / "cds" / "Model.pth",
         "input": ROOT / "generation" / "examples" / "cds_template.fasta",
-        "output_dir": ROOT / "outputs" / "generation" / "cds_demo",
+        "output_dir": ROOT / "outputs" / "generation" / "cds_example",
         "args": [
             "--num_samples", "10000",
             "--top_k", "5",
@@ -49,13 +49,13 @@ TASKS = {
         "script": ROOT / "generation" / "3utr" / "generate_3utr.py",
         "checkpoint": ROOT / "generation" / "3utr" / "Model.pth",
         "input": ROOT / "generation" / "examples" / "3utr_template.fasta",
-        "output_dir": ROOT / "outputs" / "generation" / "3utr_demo",
+        "output_dir": ROOT / "outputs" / "generation" / "3utr_example",
         "args": [
             "--num_samples", "10000",
             "--top_k", "5",
             "--device", "cuda:0",
             "--match_input_length",
-            "--output_prefix", "demo_3utr",
+            "--output_prefix", "example_3utr",
         ],
     },
 }
@@ -84,7 +84,7 @@ def command_for(task: str, python_bin: str) -> list[str]:
 
 
 def print_status(python_bin: str) -> None:
-    print("mROSE generation demo")
+    print("mROSE generation example")
 
     print("Dependency check:")
     for name in REQUIRED_MODULES:
@@ -121,12 +121,12 @@ def validate_before_run(task: str) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Print or run mROSE generation demos.")
+    parser = argparse.ArgumentParser(description="Print or run mROSE generation examples.")
     parser.add_argument(
         "--run",
         choices=["none", "5utr", "cds", "3utr", "all"],
         default="none",
-        help="Run a demo task. Default only prints commands and checks.",
+        help="Run an example task. Default only prints commands and checks.",
     )
     parser.add_argument("--python", default=sys.executable, help="Python interpreter to use.")
     args = parser.parse_args()
@@ -139,14 +139,14 @@ def main() -> int:
     for task in tasks:
         problems = validate_before_run(task)
         if problems:
-            print(f"\nCannot run {task} demo:")
+            print(f"\nCannot run {task} example:")
             for problem in problems:
                 print(f"  - {problem}")
             return 2
 
         TASKS[task]["output_dir"].mkdir(parents=True, exist_ok=True)
         cmd = command_for(task, args.python)
-        print(f"\nRunning {TASKS[task]['label']} demo...")
+        print(f"\nRunning {TASKS[task]['label']} example...")
         subprocess.run(cmd, cwd=ROOT, check=True)
 
     return 0

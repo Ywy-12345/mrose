@@ -26,7 +26,7 @@
       "label": "label"
     },
     {
-      "task": "sequence_generation_demo",
+      "task": "sequence_generation_example",
       "path": "generation/examples",
       "format": "FASTA",
       "label": "template sequences for 5utr, cds and 3utr generation"

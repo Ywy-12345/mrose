@@ -34,26 +34,26 @@ shasum -a 256 -c MODEL_CHECKSUMS.sha256
 
 If Git LFS is not installed, these paths may contain small pointer files instead of the real checkpoints, and generation will fail when PyTorch tries to load them.
 
-## Demo
+## Example
 
 Print the dependency and checkpoint status plus ready-to-run commands:
 
 ```bash
-python scripts/demo_generate_sequences.py
+python scripts/generate_sequences.py
 ```
 
-Run one demo task:
+Run one example task:
 
 ```bash
-python scripts/demo_generate_sequences.py --run 5utr
-python scripts/demo_generate_sequences.py --run cds
-python scripts/demo_generate_sequences.py --run 3utr
+python scripts/generate_sequences.py --run 5utr
+python scripts/generate_sequences.py --run cds
+python scripts/generate_sequences.py --run 3utr
 ```
 
-Run all demo tasks:
+Run all example tasks:
 
 ```bash
-python scripts/demo_generate_sequences.py --run all
+python scripts/generate_sequences.py --run all
 ```
 
 Outputs are written under `outputs/generation/`, which is ignored by Git.
@@ -69,8 +69,8 @@ python generation/5utr/generate_5utr.py \
   --num_samples 20 \
   --top_k 5 \
   --device cpu \
-  --output_dir outputs/generation/5utr_demo \
-  --output_prefix demo_5utr
+  --output_dir outputs/generation/5utr_example \
+  --output_prefix example_5utr
 ```
 
 CDS:
@@ -83,7 +83,7 @@ python generation/cds/generate_cds.py \
   --top_k 5 \
   --device cpu \
   --mfe_weight 0 \
-  --output_dir outputs/generation/cds_demo
+  --output_dir outputs/generation/cds_example
 ```
 
 3′ UTR:
@@ -96,10 +96,10 @@ python generation/3utr/generate_3utr.py \
   --top_k 5 \
   --device cpu \
   --match_input_length \
-  --output_dir outputs/generation/3utr_demo \
-  --output_prefix demo_3utr
+  --output_dir outputs/generation/3utr_example \
+  --output_prefix example_3utr
 ```
 
 ## Runtime notes
 
-The generation scripts require the scientific Python stack used by mROSE, including PyTorch, NumPy, pandas, SciPy, scikit-learn, tqdm and Biopython. The 5′ UTR and 3′ UTR generators also require ViennaRNA Python bindings for MFE scoring. The CDS demo disables MFE scoring by default with `--mfe_weight 0` so it can run in environments without ViennaRNA.
+The generation scripts require the scientific Python stack used by mROSE, including PyTorch, NumPy, pandas, SciPy, scikit-learn, tqdm and Biopython. The 5′ UTR and 3′ UTR generators also require ViennaRNA Python bindings for MFE scoring. The CDS example disables MFE scoring by default with `--mfe_weight 0` so it can run in environments without ViennaRNA.

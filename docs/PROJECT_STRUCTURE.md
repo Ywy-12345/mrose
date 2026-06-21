@@ -28,6 +28,6 @@ Standalone candidate-generation scripts:
 - `5utr/generate_5utr.py`: 5′ UTR generation and ranking.
 - `cds/generate_cds.py`: CDS generation, amino-acid preservation checks and ranking.
 - `3utr/generate_3utr.py`: 3′ UTR generation and ranking.
-- `examples/`: compact FASTA templates used by `scripts/demo_generate_sequences.py`.
+- `examples/`: compact FASTA templates used by `scripts/generate_sequences.py`.
 
 Released generation checkpoints are expected as `generation/5utr/Model.pth`, `generation/cds/Model.pth` and `generation/3utr/Model.pth`, and are tracked with Git LFS.
