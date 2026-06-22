@@ -66,11 +66,7 @@ TASKS = {
             ROOT / "generation" / "cds" / "Model.pth",
             ROOT / "generation" / "3utr" / "Model.pth",
         ],
-        "input": [
-            ROOT / "generation" / "examples" / "5utr_template.fasta",
-            ROOT / "generation" / "examples" / "cds_template.fasta",
-            ROOT / "generation" / "examples" / "3utr_template.fasta",
-        ],
+        "full_mrna_input": ROOT / "generation" / "examples" / "full_mrna_template.fasta",
         "output_dir": ROOT / "outputs" / "generation" / "full_length_example",
         "args": [
             "--num_samples", "100",
@@ -95,6 +91,8 @@ def command_for(task: str, python_bin: str) -> list[str]:
         return [
             python_bin,
             str(cfg["script"]),
+            "--full_mrna_fasta",
+            str(cfg["full_mrna_input"]),
             "--output_dir",
             str(cfg["output_dir"]),
             *cfg["args"],

@@ -7,9 +7,8 @@ three major mRNA regions and full-length assembly:
 - `cds/generate_cds.py`: generate length-matched CDS candidates and rank them
   with model score, CAI, GC and optional MFE.
 - `3utr/generate_3utr.py`: generate and rank 3′ UTR candidates.
-- `full_length/generate_full_length.py`: run the three regional generators and
-  merge same-rank 5′ UTR, CDS and 3′ UTR candidates into full-length mRNA
-  candidates.
+- `full_length/generate_full_length.py`: two input modes for full-length mRNA
+  generation (see below).
 
 The scripts were packaged from the local generation bundle and are designed to
 use one checkpoint per region for both candidate generation and scoring.
@@ -115,8 +114,27 @@ python generation/3utr/generate_3utr.py \
 
 ### Full-length mRNA
 
-The full-length launcher takes **three regional template FASTAs as input**
-(5′ UTR, CDS, 3′ UTR) and produces **combined full-length mRNA candidates**:
+The full-length launcher supports **two input modes**:
+
+#### Mode 1: Single full-length mRNA (recommended)
+
+Provide a single FASTA containing a full-length mRNA sequence. The script
+**automatically splits** it into 5′ UTR, CDS and 3′ UTR by ORF detection
+(ATG → first in-frame stop codon), then runs each regional generator:
+
+```bash
+python generation/full_length/generate_full_length.py \
+  --full_mrna_fasta generation/examples/full_mrna_template.fasta \
+  --num_samples 20 \
+  --top_k 5 \
+  --device cpu \
+  --output_dir outputs/generation/full_length_example \
+  --output_prefix example_full_length
+```
+
+#### Mode 2: Three separate regional FASTAs (legacy)
+
+Provide separate FASTA files for each region:
 
 ```bash
 python generation/full_length/generate_full_length.py \
@@ -130,12 +148,26 @@ python generation/full_length/generate_full_length.py \
   --output_prefix example_full_length
 ```
 
-**How it works:** the script runs all three regional generators independently,
-then merges same-rank candidates by concatenation:
+**How splitting works** (Mode 1):
 
 ```
-full_length_rank_1 = 5utr_rank_1 + cds_rank_1 + 3utr_rank_1
-full_length_rank_2 = 5utr_rank_2 + cds_rank_2 + 3utr_rank_2
+Input: AGGAATAA...CCACC ATG ... CDS ... TAA GCTGCC...TAAA
+                     |      |            |
+                     5′ UTR  CDS         3′ UTR
+```
+
+- 5′ UTR = everything before the first ATG
+- CDS = from ATG through the first downstream in-frame stop codon
+- 3′ UTR = everything after the stop codon
+
+Fallbacks: if no ATG is found, the first third is used as 5′ UTR. If no in-frame
+stop codon is found, the CDS is truncated to a length divisible by 3.
+
+**How merging works** (both modes):
+
+```
+full_length_rank_1 = 5utr_generated_rank_1 + cds_generated_rank_1 + 3utr_generated_rank_1
+full_length_rank_2 = 5utr_generated_rank_2 + cds_generated_rank_2 + 3utr_generated_rank_2
   ...
 ```
 
@@ -143,6 +175,10 @@ The full-length launcher writes regional outputs under:
 
 ```text
 outputs/generation/full_length_example/
+├── split_input/                       # (Mode 1 only) split regional FASTAs
+│   ├── example_full_length_5utr_split.fasta
+│   ├── example_full_length_cds_split.fasta
+│   └── example_full_length_3utr_split.fasta
 ├── 5utr/
 ├── cds/
 ├── 3utr/

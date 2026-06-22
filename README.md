@@ -123,7 +123,7 @@ mROSE also includes standalone generation entry points for designing region-spec
 | 5′ UTR | `generation/5utr/generate_5utr.py` | scored 5′ UTR candidates with predicted MRL, MFE, GC and uORF/uAUG features |
 | CDS | `generation/cds/generate_cds.py` | length-matched CDS candidates ranked by model score, CAI, GC and optional MFE |
 | 3′ UTR | `generation/3utr/generate_3utr.py` | scored 3′ UTR candidates with degradation-style prediction, MFE, GC/TC and motif penalties |
-| Full-length mRNA | `generation/full_length/generate_full_length.py` | runs the three regional generators and merges same-rank 5′ UTR, CDS and 3′ UTR outputs into full-length candidates |
+| Full-length mRNA | `generation/full_length/generate_full_length.py` | accepts a single full-length mRNA (auto-split by ORF detection) or three separate FASTAs; merges same-rank outputs into full-length candidates |
 
 The released generation checkpoints are tracked with Git LFS under:
 
