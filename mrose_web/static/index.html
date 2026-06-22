@@ -948,6 +948,7 @@
       const formError = document.querySelector("#form-error");
       const filesBox = document.querySelector("#files");
       const csvPreview = document.querySelector("#csv-preview");
+      const csvTitle = document.querySelector("#csv-title");
       const csvTableWrap = document.querySelector("#csv-table-wrap");
       const errorBox = document.querySelector("#error-box");
       const jobIdBox = document.querySelector("#job-id");
@@ -970,7 +971,6 @@
       };
 
       const stepOrder = ["queued", "running", "succeeded", "failed"];
-      const downloadFileName = "mrose_5utr_top10.csv";
       let pollTimer = null;
       let healthPayload = null;
 
@@ -1220,8 +1220,27 @@
         csvPreview.classList.add("show");
       }
 
-      async function loadCsvPreview(jobId) {
-        const response = await fetch(`/api/jobs/${jobId}/files/${downloadFileName}`);
+      function expectedCsvNames(job) {
+        const topK = Number(job.top_k || topKInput.value || 10);
+        const byRegion = {
+          "5utr": [`mrose_5utr_top${topK}.csv`],
+          "cds": ["mrose_cds_top.csv"],
+          "3utr": [`mrose_3utr_top${topK}.csv`],
+          "full": ["mrose_full_top.csv"]
+        };
+        return byRegion[job.region] || [];
+      }
+
+      function primaryCsvName(job) {
+        const files = job.files || [];
+        for (const name of expectedCsvNames(job)) {
+          if (files.includes(name)) return name;
+        }
+        return files.find((name) => name.endsWith(".csv") && !name.includes("_all_scored")) || "";
+      }
+
+      async function loadCsvPreview(jobId, filename) {
+        const response = await fetch(`/api/jobs/${jobId}/files/${encodeURIComponent(filename)}`);
         if (!response.ok) throw new Error("CSV preview unavailable.");
         renderCsvTable(parseCsv(await response.text()));
       }
@@ -1236,13 +1255,15 @@
         csvTableWrap.innerHTML = "";
         errorBox.classList.remove("show");
         errorBox.textContent = "";
-        if (job.files && job.files.includes(downloadFileName)) {
+        const resultCsv = primaryCsvName(job);
+        if (resultCsv) {
+          csvTitle.textContent = resultCsv;
           const link = document.createElement("a");
-          link.href = `/api/jobs/${job.job_id}/files/${encodeURIComponent(downloadFileName)}`;
-          link.textContent = downloadFileName;
+          link.href = `/api/jobs/${job.job_id}/files/${encodeURIComponent(resultCsv)}`;
+          link.textContent = resultCsv;
           filesBox.appendChild(link);
           if (job.status === "succeeded") {
-            loadCsvPreview(job.job_id).catch(() => {
+            loadCsvPreview(job.job_id, resultCsv).catch(() => {
               csvPreview.classList.remove("show");
             });
           }
