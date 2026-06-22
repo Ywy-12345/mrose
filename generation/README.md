@@ -1,17 +1,26 @@
 # Sequence generation
 
-This folder contains standalone mROSE sequence-generation entry points for the three major mRNA regions:
+This folder contains standalone mROSE sequence-generation entry points for the
+three major mRNA regions and full-length assembly:
 
 - `5utr/generate_5utr.py`: generate and rank 5′ UTR candidates.
-- `cds/generate_cds.py`: generate length-matched CDS candidates and rank them with model score, CAI, GC and optional MFE.
+- `cds/generate_cds.py`: generate length-matched CDS candidates and rank them
+  with model score, CAI, GC and optional MFE.
 - `3utr/generate_3utr.py`: generate and rank 3′ UTR candidates.
-- `full_length/generate_full_length.py`: run the three regional generators and merge same-rank 5′ UTR, CDS and 3′ UTR candidates into full-length mRNA candidates.
+- `full_length/generate_full_length.py`: run the three regional generators and
+  merge same-rank 5′ UTR, CDS and 3′ UTR candidates into full-length mRNA
+  candidates.
 
-The scripts were packaged from the local generation bundle and are designed to use one checkpoint per region for both candidate generation and scoring.
+The scripts were packaged from the local generation bundle and are designed to
+use one checkpoint per region for both candidate generation and scoring.
+
+For an interactive walkthrough with pre-computed results, open
+[notebooks/mROSE_generation.ipynb](../notebooks/mROSE_generation.ipynb).
 
 ## Checkpoints
 
-The released generation checkpoints are tracked with Git LFS. After cloning the repository, run:
+The released generation checkpoints are tracked with Git LFS. After cloning the
+repository, run:
 
 ```bash
 git lfs install
@@ -33,7 +42,9 @@ Verify checkpoint integrity:
 shasum -a 256 -c MODEL_CHECKSUMS.sha256
 ```
 
-If Git LFS is not installed, these paths may contain small pointer files instead of the real checkpoints, and generation will fail when PyTorch tries to load them.
+If Git LFS is not installed, these paths may contain small pointer files instead
+of the real checkpoints, and generation will fail when PyTorch tries to load
+them.
 
 ## Example
 
@@ -62,7 +73,7 @@ Outputs are written under `outputs/generation/`, which is ignored by Git.
 
 ## Direct commands
 
-5′ UTR:
+### 5′ UTR
 
 ```bash
 python generation/5utr/generate_5utr.py \
@@ -75,7 +86,7 @@ python generation/5utr/generate_5utr.py \
   --output_prefix example_5utr
 ```
 
-CDS:
+### CDS
 
 ```bash
 python generation/cds/generate_cds.py \
@@ -88,7 +99,7 @@ python generation/cds/generate_cds.py \
   --output_dir outputs/generation/cds_example
 ```
 
-3′ UTR:
+### 3′ UTR
 
 ```bash
 python generation/3utr/generate_3utr.py \
@@ -102,7 +113,10 @@ python generation/3utr/generate_3utr.py \
   --output_prefix example_3utr
 ```
 
-Full-length mRNA:
+### Full-length mRNA
+
+The full-length launcher takes **three regional template FASTAs as input**
+(5′ UTR, CDS, 3′ UTR) and produces **combined full-length mRNA candidates**:
 
 ```bash
 python generation/full_length/generate_full_length.py \
@@ -116,6 +130,15 @@ python generation/full_length/generate_full_length.py \
   --output_prefix example_full_length
 ```
 
+**How it works:** the script runs all three regional generators independently,
+then merges same-rank candidates by concatenation:
+
+```
+full_length_rank_1 = 5utr_rank_1 + cds_rank_1 + 3utr_rank_1
+full_length_rank_2 = 5utr_rank_2 + cds_rank_2 + 3utr_rank_2
+  ...
+```
+
 The full-length launcher writes regional outputs under:
 
 ```text
@@ -127,8 +150,15 @@ outputs/generation/full_length_example/
 └── example_full_length_top5.fasta
 ```
 
-Rows are merged by rank: rank 1 5′ UTR + rank 1 CDS + rank 1 3′ UTR, rank 2 + rank 2 + rank 2, and so on.
+**Output columns** (CSV): `rank`, `sequence`, `five_utr_sequence`,
+`cds_sequence`, `three_utr_sequence`, `five_utr_length`, `cds_length`,
+`three_utr_length`, `full_length`, `five_utr_score`, `cds_score`,
+`three_utr_score`.
 
 ## Runtime notes
 
-The generation scripts require the scientific Python stack used by mROSE, including PyTorch, NumPy, pandas, SciPy, scikit-learn, tqdm and Biopython. The 5′ UTR and 3′ UTR generators also require ViennaRNA Python bindings for MFE scoring. The CDS example disables MFE scoring by default with `--mfe_weight 0` so it can run in environments without ViennaRNA.
+The generation scripts require the scientific Python stack used by mROSE,
+including PyTorch, NumPy, pandas, SciPy, scikit-learn, tqdm and Biopython. The
+5′ UTR and 3′ UTR generators also require ViennaRNA Python bindings for MFE
+scoring. The CDS example disables MFE scoring by default with `--mfe_weight 0`
+so it can run in environments without ViennaRNA.

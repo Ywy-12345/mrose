@@ -42,7 +42,7 @@ MANUSCRIPT_OVERVIEW
 :maxdepth: 1
 :caption: Project links
 
-GitHub repository <https://github.com/xiaoshaziydy/mrose>
+GitHub repository <https://github.com/Ywy-12345/mrose>
 ReadTheDocs documentation <https://mrose.readthedocs.io/>
 Zenodo data and model archive <https://doi.org/10.5281/zenodo.20756460>
 ```

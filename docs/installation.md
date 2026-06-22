@@ -4,7 +4,7 @@ Clone the repository with Git LFS enabled so the released generation checkpoints
 
 ```bash
 git lfs install
-git clone https://github.com/xiaoshaziydy/mrose.git
+git clone https://github.com/Ywy-12345/mrose.git
 cd mrose
 git lfs pull
 ```
