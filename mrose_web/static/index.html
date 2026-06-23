@@ -561,11 +561,20 @@
         font-weight: 500;
       }
 
+      .control-output {
+        min-height: 330px;
+        margin-top: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 22px;
+        padding: 14px;
+        background: rgba(0, 0, 0, 0.08);
+      }
+
       .job-panel {
         grid-column: 1 / -1;
         display: grid;
-        grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
-        min-height: 232px;
+        grid-template-columns: 1fr;
+        min-height: 184px;
       }
 
       .timeline,
@@ -573,8 +582,16 @@
         padding: 28px;
       }
 
+      .control-panel .control-output {
+        padding: 14px;
+      }
+
+      .control-panel .job-readout {
+        margin-top: 0;
+      }
+
       .timeline {
-        border-right: 1px solid var(--hairline);
+        border-right: 0;
       }
 
       .steps {
@@ -659,6 +676,7 @@
         border: 1px solid var(--border-light);
         border-radius: 8px;
         padding: 12px;
+        color: var(--ink);
         background: var(--canvas);
       }
 
@@ -704,6 +722,7 @@
         margin-top: 14px;
         border: 1px solid var(--hairline);
         border-radius: 8px;
+        color: var(--ink);
         background: var(--canvas);
         box-shadow: var(--shadow-tight);
         overflow: hidden;
@@ -1016,20 +1035,8 @@
               <div class="inline-error" id="form-error" role="alert"></div>
             </div>
           </form>
-        </aside>
 
-        <section class="job-panel" aria-labelledby="job-title">
-          <div class="timeline">
-            <h2 class="panel-title" id="job-title">Job timeline</h2>
-            <div class="steps" id="steps">
-              <div class="step" data-step="queued"><b>queued</b><span>Waiting for worker</span></div>
-              <div class="step" data-step="running"><b>running</b><span>Generating candidates</span></div>
-              <div class="step" data-step="succeeded"><b>succeeded</b><span>Files are ready</span></div>
-              <div class="step" data-step="failed"><b>failed</b><span>Review logs</span></div>
-            </div>
-          </div>
-
-          <div class="job-detail">
+          <div class="job-detail control-output">
             <div class="job-readout">
               <div class="readout">
                 <span>job id</span>
@@ -1056,6 +1063,18 @@
               <div class="csv-table-wrap" id="csv-table-wrap"></div>
             </div>
             <div class="error-box" id="error-box"></div>
+          </div>
+        </aside>
+
+        <section class="job-panel" aria-labelledby="job-title">
+          <div class="timeline">
+            <h2 class="panel-title" id="job-title">Job timeline</h2>
+            <div class="steps" id="steps">
+              <div class="step" data-step="queued"><b>queued</b><span>Waiting for worker</span></div>
+              <div class="step" data-step="running"><b>running</b><span>Generating candidates</span></div>
+              <div class="step" data-step="succeeded"><b>succeeded</b><span>Files are ready</span></div>
+              <div class="step" data-step="failed"><b>failed</b><span>Review logs</span></div>
+            </div>
           </div>
         </section>
       </div>
