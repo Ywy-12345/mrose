@@ -184,7 +184,7 @@
       .sequence-panel {
         min-height: 660px;
         display: grid;
-        grid-template-rows: auto auto 1fr auto;
+        grid-template-rows: auto auto auto auto auto;
       }
 
       .panel-head {
@@ -280,8 +280,8 @@
       }
 
       .lane {
-        min-height: 320px;
-        max-height: 460px;
+        min-height: 220px;
+        max-height: 300px;
         overflow: auto;
         border: 1px solid var(--hairline);
         border-radius: 22px;
@@ -571,10 +571,16 @@
       }
 
       .job-panel {
-        grid-column: 1 / -1;
         display: grid;
         grid-template-columns: 1fr;
         min-height: 184px;
+      }
+
+      .sequence-panel .job-panel {
+        border: 0;
+        border-top: 1px solid var(--hairline);
+        border-radius: 0;
+        background: var(--canvas);
       }
 
       .timeline,
@@ -897,7 +903,7 @@
         }
 
         .lane {
-          min-height: 260px;
+          min-height: 200px;
         }
 
         .base-grid {
@@ -986,6 +992,18 @@
               </label>
             </div>
           </div>
+
+          <section class="job-panel" aria-labelledby="job-title">
+            <div class="timeline">
+              <h2 class="panel-title" id="job-title">Job timeline</h2>
+              <div class="steps" id="steps">
+                <div class="step" data-step="queued"><b>queued</b><span>Waiting for worker</span></div>
+                <div class="step" data-step="running"><b>running</b><span>Generating candidates</span></div>
+                <div class="step" data-step="succeeded"><b>succeeded</b><span>Files are ready</span></div>
+                <div class="step" data-step="failed"><b>failed</b><span>Review logs</span></div>
+              </div>
+            </div>
+          </section>
         </section>
 
         <aside class="control-panel" aria-labelledby="controls-title">
@@ -1065,18 +1083,6 @@
             <div class="error-box" id="error-box"></div>
           </div>
         </aside>
-
-        <section class="job-panel" aria-labelledby="job-title">
-          <div class="timeline">
-            <h2 class="panel-title" id="job-title">Job timeline</h2>
-            <div class="steps" id="steps">
-              <div class="step" data-step="queued"><b>queued</b><span>Waiting for worker</span></div>
-              <div class="step" data-step="running"><b>running</b><span>Generating candidates</span></div>
-              <div class="step" data-step="succeeded"><b>succeeded</b><span>Files are ready</span></div>
-              <div class="step" data-step="failed"><b>failed</b><span>Review logs</span></div>
-            </div>
-          </div>
-        </section>
       </div>
     </main>
 
