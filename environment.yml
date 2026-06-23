@@ -133,7 +133,7 @@ dependencies:
   - optuna==4.6.0
   - overrides==7.7.0
   - packaging==24.1
-  - pandas==2.3.3
+  - pandas==2.2.3
   - pandocfilters==1.5.1
   - parso==0.8.5
   - pexpect==4.9.0
