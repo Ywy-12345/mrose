@@ -63,6 +63,11 @@ def health() -> dict[str, object]:
         "checkpoints": checkpoints,
         "ready_for_generation": ready_for_generation,
         "default_device": DEFAULT_DEVICE,
+        "limits": {
+            "max_sequence_length": MAX_SEQUENCE_LENGTH,
+            "max_samples": MAX_SAMPLES,
+            "max_top_k": MAX_TOP_K,
+        },
         "regions": {
             "5utr": {"label": "5' UTR", "ready": checkpoints["5utr"]["ready"]},
             "cds": {"label": "CDS", "ready": checkpoints["cds"]["ready"]},
