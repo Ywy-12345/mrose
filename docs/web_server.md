@@ -1,18 +1,34 @@
 # Web server
 
-mROSE includes a lightweight FastAPI web server for online region-specific sequence generation.
+mROSE includes a lightweight FastAPI web server for browser-based sequence
+generation and programmatic API access.
+
+## Online entry
+
+The public project entry point is:
+
+[https://ywy-12345.github.io/mrose/](https://ywy-12345.github.io/mrose/)
+
+This stable GitHub Pages URL redirects to the current Cloudflare Quick Tunnel
+used by the project server. The underlying `trycloudflare.com` address is
+temporary and may change.
+
+Use the online entry for quick manual testing. Use a local deployment when you
+need control over GPU resources, job storage or network access.
+
+## What the server provides
 
 The server provides:
 
 - a browser form at `/`;
 - `GET /api/health` for service and checkpoint status;
-- `POST /api/generate` to submit 5′ UTR, CDS or 3′ UTR generation jobs;
+- `POST /api/generate` to submit 5′ UTR, CDS, 3′ UTR or full-length mRNA jobs;
 - `GET /api/jobs/{job_id}` to poll job status;
-- `GET /api/jobs/{job_id}/files/{filename}` to download CSV, FASTA and log files.
+- `GET /api/jobs/{job_id}/files/{filename}` to download result files.
 
 Jobs run in the background and write isolated outputs under `outputs/web_jobs/`. This directory is ignored by Git.
 
-## Install
+## Local setup
 
 Install the mROSE scientific environment first, then add the web dependencies:
 
@@ -42,6 +58,17 @@ The OpenAPI schema is available at:
 http://localhost:8000/docs
 ```
 
+## Browser workflow
+
+1. Select a target region: 5′ UTR, CDS, 3′ UTR or full mRNA.
+2. Paste the input sequence or use one of the example buttons.
+3. Set `Samples`, `Top K` and `Temperature`.
+4. Run generation and wait for the job timeline to reach `succeeded`.
+5. Review the result table and download the primary CSV result file.
+
+The web interface displays the main ranked results and hides lower-level
+diagnostic columns by default.
+
 ## Runtime configuration
 
 The server reads these environment variables:
@@ -54,6 +81,7 @@ The server reads these environment variables:
 | `MROSE_WEB_MAX_SEQUENCE_LENGTH` | `6000` | Maximum accepted input sequence length |
 | `MROSE_WEB_MAX_SAMPLES` | `10000` | Maximum accepted `num_samples` |
 | `MROSE_WEB_MAX_TOP_K` | `100` | Maximum accepted `top_k` |
+| `MROSE_WEB_DEFAULT_DEVICE` | `cpu` | Device preselected by API defaults, for example `cuda:0` |
 
 For the project server environment, a typical command is:
 
@@ -101,7 +129,7 @@ Use HTTPS in production, for example with Certbot-managed TLS certificates.
 
 ## API example
 
-Submit a job:
+Submit a 5′ UTR job:
 
 ```bash
 curl -X POST http://localhost:8000/api/generate \
@@ -109,6 +137,23 @@ curl -X POST http://localhost:8000/api/generate \
   -d '{
     "region": "5utr",
     "sequence": "AGGAATAAACTAGTATTCTTCTGGTCCCCACAGACTCAGAGAGAACCCGCCACC",
+    "num_samples": 100,
+    "top_k": 10,
+    "device": "cuda:0",
+    "temperature": 1.0
+  }'
+```
+
+Submit a full-length mRNA job:
+
+```bash
+curl -X POST http://localhost:8000/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "region": "full",
+    "sequence_5utr": "AGGAATAAACTAGTATTCTTCTGGTCCCCACAGACTCAGAGAGAACCCGCCACC",
+    "sequence_cds": "ATGGCCGAGGAGCTGTTTCACCGGGGTGGTGCCCATCCTGGTCGCCGTGGCCACCATGGTGGCCCTGCACCTGAGCGAGGAGCTGCAGGCCATGAAGGCCACCGAGGCCGCCGAGTAA",
+    "sequence_3utr": "GCTGCCCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCCCTGAGGCTGAGCTGAGCTGAGCTGAGCTGAGCTGAGCTGAGCTGAGCTGAATAAA",
     "num_samples": 100,
     "top_k": 10,
     "device": "cuda:0",
@@ -131,4 +176,3 @@ curl -O http://localhost:8000/api/jobs/<job_id>/files/mrose_5utr_top10.csv
 ## Safety notes
 
 The web layer validates region, device, sequence characters, sequence length, sample count and top-k before launching a job. Generation commands are executed as argument lists, not through a shell. Keep the server behind authentication or a private network if it is attached to a GPU host, because each request can consume substantial compute.
-

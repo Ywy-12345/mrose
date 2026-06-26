@@ -21,7 +21,9 @@ mROSE separates mRNA design into biologically meaningful regions:
 - **3′ UTR module** for post-transcriptional regulation, including RNA-binding protein interaction and m6A-related regulatory prediction.
 - **Full-length fusion module** for transcript-level stability and expression-associated phenotypes.
 
-This documentation explains how to install the project, run compact examples, use the sequence-generation examples and map the codebase to the manuscript.
+This documentation is organized as a practical path: start with the quick guide,
+install the environment, run sequence generation, then move to the web server,
+notebook walkthroughs, experiments and reference material.
 
 The full mROSE data and model archive is available on Zenodo: [10.5281/zenodo.20756460](https://doi.org/10.5281/zenodo.20756460).
 
@@ -29,11 +31,18 @@ The full mROSE data and model archive is available on Zenodo: [10.5281/zenodo.20
 :maxdepth: 2
 :caption: User guide
 
+quickstart
 installation
 generation
 web_server
 notebooks/mROSE_generation
 experiments
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Reference
+
 PROJECT_STRUCTURE
 MANUSCRIPT_OVERVIEW
 ```
