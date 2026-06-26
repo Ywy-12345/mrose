@@ -155,9 +155,9 @@ See [generation/README.md](generation/README.md) for direct commands for 5′ UT
 
 mROSE includes a lightweight FastAPI web server for online sequence-generation jobs:
 
-Online server: [https://monsters-owned-seo-demands.trycloudflare.com](https://monsters-owned-seo-demands.trycloudflare.com)
+Online server: [https://ywy-12345.github.io/mrose/](https://ywy-12345.github.io/mrose/)
 
-This public URL is served through a temporary Cloudflare Quick Tunnel, so the `trycloudflare.com` subdomain is assigned automatically. To use an mROSE-branded URL such as `mrose.example.org`, deploy with a named Cloudflare Tunnel and a custom domain.
+This stable GitHub Pages entry redirects to the current Cloudflare Quick Tunnel URL. The underlying `trycloudflare.com` subdomain is temporary and may be reassigned automatically. To use an mROSE-branded URL such as `mrose.example.org`, deploy with a named Cloudflare Tunnel and a custom domain.
 
 ```bash
 pip install -r web-requirements.txt
