@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset, ConcatDataset
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import math
 from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, f1_score, matthews_corrcoef
@@ -1571,15 +1571,6 @@ def train_single_gpu(args):
         char_to_idx=vocab_info['char_to_idx'],
         nuc_char_to_idx=vocab_info['nuc_char_to_idx']
     )
-    val_dataset = RNADataset(
-        data_path,
-        split='val',
-        is_train=False,
-        max_len=args.max_len,
-        codon_table=vocab_info['codon_table'],
-        char_to_idx=vocab_info['char_to_idx'],
-        nuc_char_to_idx=vocab_info['nuc_char_to_idx']
-    )
     test_dataset = RNADataset(
         data_path,
         split='test',
@@ -1590,11 +1581,7 @@ def train_single_gpu(args):
         nuc_char_to_idx=vocab_info['nuc_char_to_idx']
     )
 
-    if args.merge_train_val:
-        train_dataset = ConcatDataset([train_dataset, val_dataset])
-        print('Training set = train + val')
-    else:
-        print('Training set = train only')
+    print('Training set = train only')
 
     train_loader = get_data_loader(
         train_dataset,
@@ -1842,15 +1829,6 @@ def train_ddp(args):
             char_to_idx=vocab_info['char_to_idx'],
             nuc_char_to_idx=vocab_info['nuc_char_to_idx']
         )
-        val_dataset = RNADataset(
-            data_path,
-            split='val',
-            is_train=False,
-            max_len=args.max_len,
-            codon_table=vocab_info['codon_table'],
-            char_to_idx=vocab_info['char_to_idx'],
-            nuc_char_to_idx=vocab_info['nuc_char_to_idx']
-        )
         test_dataset = RNADataset(
             data_path,
             split='test',
@@ -1861,13 +1839,8 @@ def train_ddp(args):
             nuc_char_to_idx=vocab_info['nuc_char_to_idx']
         )
 
-        if args.merge_train_val:
-            train_dataset = ConcatDataset([train_dataset, val_dataset])
-            if rank == 0:
-                print('Training set = train + val')
-        else:
-            if rank == 0:
-                print('Training set = train only')
+        if rank == 0:
+            print('Training set = train only')
 
         train_loader = get_data_loader(
             train_dataset,
@@ -2113,8 +2086,6 @@ def parse_args():
     parser.add_argument('--num_embeddings', type=int, default=32)
     parser.add_argument('--commitment_cost', type=float, default=0.01)
 
-    parser.add_argument('--merge_train_val', action='store_true', default=True, help='Use train + val for continued training, as in the uploaded code')
-    parser.add_argument('--train_only', dest='merge_train_val', action='store_false', help='Use only the train split for continued training')
     parser.add_argument('--train_augmentation', action='store_true', help='Enable random codon mutation augmentation during continued training')
     parser.add_argument('--resume_optimizer', action='store_true', help='Load optimizer if the checkpoint contains optimizer_state_dict')
     parser.add_argument('--auto_match_checkpoint', action='store_true', default=True,

@@ -1,9 +1,8 @@
 import os
+import argparse
 import math
 import warnings
-import itertools
 import gc
-import shutil
 
 # --- CUDA memory-fragmentation setting for older PyTorch versions; must be set before importing torch ---
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
@@ -511,8 +510,186 @@ def infer_max_lens_from_dataset(
 # ==========================================
 # 4. Top-level multi-branch fusion network architecture
 # ==========================================
+class RegionalCrossAttentionBlock(nn.Module):
+    """Use one region as query and the other two regions as context."""
+
+    def __init__(self, latent_dim, num_heads=4, dropout=0.2, ffn_multiplier=2):
+        super().__init__()
+        if latent_dim % num_heads != 0:
+            raise ValueError(
+                f"latent_dim ({latent_dim}) must be divisible by num_heads ({num_heads})."
+            )
+
+        self.query_norm = nn.LayerNorm(latent_dim)
+        self.context_norm = nn.LayerNorm(latent_dim)
+        self.cross_attention = nn.MultiheadAttention(
+            embed_dim=latent_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.attention_dropout = nn.Dropout(dropout)
+        self.attention_norm = nn.LayerNorm(latent_dim)
+
+        ffn_dim = latent_dim * ffn_multiplier
+        self.ffn = nn.Sequential(
+            nn.Linear(latent_dim, ffn_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(ffn_dim, latent_dim),
+            nn.Dropout(dropout),
+        )
+        self.output_norm = nn.LayerNorm(latent_dim)
+
+    def forward(self, query_region, context_regions, return_attention=False):
+        if query_region.dim() != 2:
+            raise ValueError(
+                f"query_region must have shape [B, D], got {tuple(query_region.shape)}"
+            )
+        if context_regions.dim() != 3 or context_regions.size(1) != 2:
+            raise ValueError(
+                "context_regions must have shape [B, 2, D], "
+                f"got {tuple(context_regions.shape)}"
+            )
+
+        query = self.query_norm(query_region).unsqueeze(1)
+        context = self.context_norm(context_regions)
+        attention_output, attention_weights = self.cross_attention(
+            query=query,
+            key=context,
+            value=context,
+            need_weights=return_attention,
+            average_attn_weights=False,
+        )
+
+        enhanced = self.attention_norm(
+            query_region.unsqueeze(1) + self.attention_dropout(attention_output)
+        )
+        enhanced = self.output_norm(enhanced + self.ffn(enhanced)).squeeze(1)
+
+        if return_attention:
+            return enhanced, attention_weights.squeeze(2)
+        return enhanced
+
+
+class CrossAttentionFusion(nn.Module):
+    """Fuse 5'UTR, CDS, and 3'UTR representations with three-way attention."""
+
+    def __init__(self, latent_dim, num_heads=2, dropout=0.1):
+        super().__init__()
+        self.align_5utr = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim),
+            nn.GELU(),
+            nn.LayerNorm(latent_dim),
+        )
+        self.align_cds = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim),
+            nn.GELU(),
+            nn.LayerNorm(latent_dim),
+        )
+        self.align_3utr = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim),
+            nn.GELU(),
+            nn.LayerNorm(latent_dim),
+        )
+
+        self.attend_5utr = RegionalCrossAttentionBlock(
+            latent_dim, num_heads=num_heads, dropout=dropout
+        )
+        self.attend_cds = RegionalCrossAttentionBlock(
+            latent_dim, num_heads=num_heads, dropout=dropout
+        )
+        self.attend_3utr = RegionalCrossAttentionBlock(
+            latent_dim, num_heads=num_heads, dropout=dropout
+        )
+
+        fusion_dim = latent_dim * 3
+        self.region_fusion = nn.Sequential(
+            nn.Linear(fusion_dim, latent_dim * 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(latent_dim * 2, latent_dim),
+        )
+        self.region_gate = nn.Sequential(
+            nn.Linear(fusion_dim, latent_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(latent_dim, 3),
+        )
+        self.output_norm = nn.LayerNorm(latent_dim)
+        self.output_dropout = nn.Dropout(dropout)
+
+    def forward(self, latent_5, latent_c, latent_3, return_attention=False):
+        for name, latent in (
+            ("latent_5", latent_5),
+            ("latent_c", latent_c),
+            ("latent_3", latent_3),
+        ):
+            if latent.dim() != 2:
+                raise ValueError(
+                    f"{name} must have shape [B, D], got {tuple(latent.shape)}"
+                )
+
+        h5 = self.align_5utr(latent_5)
+        hc = self.align_cds(latent_c)
+        h3 = self.align_3utr(latent_3)
+        context_for_5 = torch.stack([hc, h3], dim=1)
+        context_for_c = torch.stack([h5, h3], dim=1)
+        context_for_3 = torch.stack([h5, hc], dim=1)
+
+        if return_attention:
+            enhanced_5, attention_5 = self.attend_5utr(
+                h5, context_for_5, return_attention=True
+            )
+            enhanced_c, attention_c = self.attend_cds(
+                hc, context_for_c, return_attention=True
+            )
+            enhanced_3, attention_3 = self.attend_3utr(
+                h3, context_for_3, return_attention=True
+            )
+        else:
+            enhanced_5 = self.attend_5utr(h5, context_for_5)
+            enhanced_c = self.attend_cds(hc, context_for_c)
+            enhanced_3 = self.attend_3utr(h3, context_for_3)
+
+        enhanced_regions = torch.stack(
+            [enhanced_5, enhanced_c, enhanced_3], dim=1
+        )
+        concatenated = enhanced_regions.reshape(enhanced_regions.size(0), -1)
+        gate_weights = torch.softmax(self.region_gate(concatenated), dim=-1)
+        gated_representation = torch.sum(
+            enhanced_regions * gate_weights.unsqueeze(-1), dim=1
+        )
+        fused_interaction = self.region_fusion(concatenated)
+        h_mrna = self.output_norm(
+            gated_representation + self.output_dropout(fused_interaction)
+        )
+
+        if return_attention:
+            return h_mrna, {
+                "region_gate_weights": gate_weights,
+                "attention_5utr_to_cds_3utr": attention_5,
+                "attention_cds_to_5utr_3utr": attention_c,
+                "attention_3utr_to_5utr_cds": attention_3,
+                "enhanced_5utr": enhanced_5,
+                "enhanced_cds": enhanced_c,
+                "enhanced_3utr": enhanced_3,
+            }
+        return h_mrna
+
+
 class GlobalmRNAMasterModel(nn.Module):
-    def __init__(self, max_len_5, max_len_c, max_len_3, embed_dim=16, hidden_dim=16, latent_dim=16):
+    def __init__(
+        self,
+        max_len_5,
+        max_len_c,
+        max_len_3,
+        embed_dim=16,
+        hidden_dim=16,
+        latent_dim=16,
+        fusion_num_heads=None,
+        fusion_dropout=0.2,
+    ):
         super(GlobalmRNAMasterModel, self).__init__()
 
         self.max_len_5 = max_len_5
@@ -551,14 +728,22 @@ class GlobalmRNAMasterModel(nn.Module):
             num_decoder_layers=1,
         )
 
-        fusion_dim = latent_dim * 3
+        if fusion_num_heads is None:
+            fusion_num_heads = next(
+                heads for heads in (4, 2, 1) if latent_dim % heads == 0
+            )
 
-        self.fusion_head = nn.Sequential(
-            nn.Linear(fusion_dim, 128),
-            nn.LayerNorm(128),
-            nn.LeakyReLU(0.01),
-            nn.Dropout(0.2),
-            nn.Linear(128, 1),
+        self.fusion_head = CrossAttentionFusion(
+            latent_dim=latent_dim,
+            num_heads=fusion_num_heads,
+            dropout=fusion_dropout,
+        )
+        self.mrna_head = nn.Sequential(
+            nn.Linear(latent_dim, 32),
+            nn.LayerNorm(32),
+            nn.GELU(),
+            nn.Dropout(fusion_dropout),
+            nn.Linear(32, 1),
         )
 
         self.head_5utr = nn.Sequential(
@@ -584,7 +769,17 @@ class GlobalmRNAMasterModel(nn.Module):
         self.pred_scale = nn.Parameter(torch.tensor(1.0))
         self.pred_shift = nn.Parameter(torch.tensor(0.0))
 
-    def forward(self, x_5, x_c, x_c_nuc, x_3, feat_5, feat_3, noise_std=0.0):
+    def forward(
+        self,
+        x_5,
+        x_c,
+        x_c_nuc,
+        x_3,
+        feat_5,
+        feat_3,
+        noise_std=0.0,
+        return_fusion_attention=False,
+    ):
         latent_5, aux_5 = self.branch_5utr(
             src=x_5, stacked_features=feat_5, noise_std=noise_std
         )
@@ -602,8 +797,15 @@ class GlobalmRNAMasterModel(nn.Module):
             src=x_3, stacked_features=feat_3, noise_std=noise_std
         )
 
-        fused_representation = torch.cat([latent_5, latent_c, latent_3], dim=1)
-        pred_fusion = self.fusion_head(fused_representation)
+        if return_fusion_attention:
+            fused_representation, fusion_aux = self.fusion_head(
+                latent_5, latent_c, latent_3, return_attention=True
+            )
+        else:
+            fused_representation = self.fusion_head(latent_5, latent_c, latent_3)
+            fusion_aux = None
+
+        pred_fusion = self.mrna_head(fused_representation)
         pred_fusion = pred_fusion * self.pred_scale + self.pred_shift
 
         pred_5 = self.head_5utr(latent_5) * self.output_scale
@@ -611,6 +813,8 @@ class GlobalmRNAMasterModel(nn.Module):
         pred_3 = self.head_3utr(latent_3) * self.output_scale
 
         cds_tuple = (logits_c, nuc_logits_c, mu_c, logvar_c, denoising_c, codon_rep, nuc_rep)
+        if return_fusion_attention:
+            return pred_fusion, pred_5, pred_c, pred_3, aux_5, aux_3, cds_tuple, fusion_aux
         return pred_fusion, pred_5, pred_c, pred_3, aux_5, aux_3, cds_tuple
 
 
@@ -637,7 +841,84 @@ def is_finite_batch(batch):
     )
 
 
-def train_master_model(MAX_LEN_5, MAX_LEN_C, MAX_LEN_3, train_csv, test_csv, temp_save_path, EPOCHS=40):
+def evaluate_regression_model(model, data_loader, device):
+    model.eval()
+    predictions = []
+    labels = []
+    loss_total = 0.0
+    valid_steps = 0
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(data_loader):
+            batch = move_batch_to_device(batch, device)
+            if not is_finite_batch(batch):
+                print(f"Skipping invalid evaluation batch: batch_idx={batch_idx}")
+                continue
+
+            with autocast(enabled=(device.type == "cuda")):
+                pred_fusion, _, _, _, _, _, _ = model(
+                    x_5=batch["5utr_x"],
+                    x_c=batch["cds_x"],
+                    x_c_nuc=batch["cds_nuc_x"],
+                    x_3=batch["3utr_x"],
+                    feat_5=batch["feat_5"],
+                    feat_3=batch["feat_3"],
+                    noise_std=0.0,
+                )
+
+            if not torch.isfinite(pred_fusion).all():
+                print(f"Skipping non-finite evaluation prediction: batch_idx={batch_idx}")
+                continue
+
+            batch_loss = F.mse_loss(
+                pred_fusion.float().squeeze(),
+                batch["label"].float().squeeze(),
+            )
+            if not torch.isfinite(batch_loss):
+                print(f"Skipping non-finite evaluation loss: batch_idx={batch_idx}")
+                continue
+
+            loss_total += float(batch_loss.detach().cpu().item())
+            valid_steps += 1
+            predictions.extend(pred_fusion.detach().float().cpu().numpy().flatten())
+            labels.extend(batch["label"].detach().float().cpu().numpy().flatten())
+
+    predictions = np.asarray(predictions, dtype=np.float32)
+    labels = np.asarray(labels, dtype=np.float32)
+    finite_mask = np.isfinite(predictions) & np.isfinite(labels)
+    if finite_mask.sum() < 2:
+        return {"mse": float("nan"), "pearson": 0.0, "r2": -10000.0}
+
+    predictions = predictions[finite_mask]
+    labels = labels[finite_mask]
+    if np.std(predictions) < 1e-12 or np.std(labels) < 1e-12:
+        pearson_corr = 0.0
+    else:
+        pearson_corr, _ = pearsonr(labels, predictions)
+        if not np.isfinite(pearson_corr):
+            pearson_corr = 0.0
+
+    r2_value = r2_score(labels, predictions)
+    if not np.isfinite(r2_value):
+        r2_value = -10000.0
+
+    return {
+        "mse": loss_total / max(1, valid_steps),
+        "pearson": float(pearson_corr),
+        "r2": float(r2_value),
+    }
+
+
+def train_master_model(
+    MAX_LEN_5,
+    MAX_LEN_C,
+    MAX_LEN_3,
+    train_csv,
+    val_csv,
+    test_csv,
+    final_model_path,
+    EPOCHS=40,
+):
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_gpus = torch.cuda.device_count()
 
@@ -647,7 +928,12 @@ def train_master_model(MAX_LEN_5, MAX_LEN_C, MAX_LEN_3, train_csv, test_csv, tem
     LR = 1e-3
 
     train_dataset = FullmRNAFusionDataset(train_csv, MAX_LEN_5, MAX_LEN_C, MAX_LEN_3)
-    val_dataset = FullmRNAFusionDataset(test_csv, MAX_LEN_5, MAX_LEN_C, MAX_LEN_3)
+    val_dataset = (
+        FullmRNAFusionDataset(val_csv, MAX_LEN_5, MAX_LEN_C, MAX_LEN_3)
+        if val_csv
+        else None
+    )
+    test_dataset = FullmRNAFusionDataset(test_csv, MAX_LEN_5, MAX_LEN_C, MAX_LEN_3)
 
     pin_memory = DEVICE.type == "cuda"
     train_loader = DataLoader(
@@ -657,8 +943,16 @@ def train_master_model(MAX_LEN_5, MAX_LEN_C, MAX_LEN_3, train_csv, test_csv, tem
         drop_last=True,
         pin_memory=pin_memory,
     )
-    val_loader = DataLoader(
-        val_dataset,
+    val_loader = None
+    if val_dataset is not None:
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=MICRO_BATCH_SIZE,
+            shuffle=False,
+            pin_memory=pin_memory,
+        )
+    test_loader = DataLoader(
+        test_dataset,
         batch_size=MICRO_BATCH_SIZE,
         shuffle=False,
         pin_memory=pin_memory,
@@ -687,6 +981,7 @@ def train_master_model(MAX_LEN_5, MAX_LEN_C, MAX_LEN_3, train_csv, test_csv, tem
         {"params": raw_model.branch_cds.parameters(), "lr": LR * 0.1},
         {"params": raw_model.branch_3utr.parameters(), "lr": LR * 0.1},
         {"params": raw_model.fusion_head.parameters(), "lr": LR},
+        {"params": raw_model.mrna_head.parameters(), "lr": LR},
         {"params": raw_model.head_5utr.parameters(), "lr": LR},
         {"params": raw_model.head_cds.parameters(), "lr": LR},
         {"params": raw_model.head_3utr.parameters(), "lr": LR},
@@ -696,7 +991,6 @@ def train_master_model(MAX_LEN_5, MAX_LEN_C, MAX_LEN_3, train_csv, test_csv, tem
 
     optimizer = torch.optim.AdamW(param_groups, weight_decay=0.05, foreach=False)
     scaler = GradScaler(enabled=(DEVICE.type == "cuda"))
-    best_r2_val = -10000.0
 
     total_steps = max(1, math.ceil(len(train_loader) / ACCUMULATION_STEPS) * EPOCHS)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
@@ -707,6 +1001,7 @@ def train_master_model(MAX_LEN_5, MAX_LEN_C, MAX_LEN_3, train_csv, test_csv, tem
         anneal_strategy="cos",
     )
 
+    val_metrics = None
     for epoch in range(EPOCHS):
         model.train()
         train_mse_fus = 0.0
@@ -785,120 +1080,45 @@ def train_master_model(MAX_LEN_5, MAX_LEN_C, MAX_LEN_3, train_csv, test_csv, tem
             del pred_fusion, pred_5, pred_c, pred_3, aux_5, aux_3, cds_tuple
             del logits_c, nuc_logits_c, mu_c, logvar_c, denoising_c, codon_rep, nuc_rep
 
-        model.eval()
-        val_preds, val_labels = [], []
-        val_loss_total = 0.0
-        valid_val_steps = 0
-
-        val_pbar = tqdm(
-            val_loader,
-            desc=f"Epoch [{epoch + 1:02d}/{EPOCHS}] Valid",
-            leave=False,
-            disable=True,
-        )
-
-        with torch.no_grad():
-            for batch_idx, batch in enumerate(val_pbar):
-                batch = move_batch_to_device(batch, DEVICE)
-
-                if not is_finite_batch(batch):
-                    print(f"⚠️ Skipping invalid validation batch: epoch={epoch + 1}, batch_idx={batch_idx}")
-                    continue
-
-                with autocast(enabled=(DEVICE.type == "cuda")):
-                    pred_fusion, _, _, _, _, _, _ = model(
-                        x_5=batch["5utr_x"],
-                        x_c=batch["cds_x"],
-                        x_c_nuc=batch["cds_nuc_x"],
-                        x_3=batch["3utr_x"],
-                        feat_5=batch["feat_5"],
-                        feat_3=batch["feat_3"],
-                        noise_std=0.0,
-                    )
-
-                if not torch.isfinite(pred_fusion).all():
-                    print(
-                        f"⚠️ NaN/Inf detected in pred_fusion during validation; skipping batch: "
-                        f"epoch={epoch + 1}, batch_idx={batch_idx}"
-                    )
-                    continue
-
-                v_loss = F.mse_loss(
-                    pred_fusion.float().squeeze(),
-                    batch["label"].float().squeeze(),
-                )
-
-                if not torch.isfinite(v_loss):
-                    print(
-                        f"⚠️ NaN/Inf detected in v_loss during validation; skipping batch: "
-                        f"epoch={epoch + 1}, batch_idx={batch_idx}"
-                    )
-                    continue
-
-                val_loss_total += float(v_loss.detach().cpu().item())
-                valid_val_steps += 1
-
-                val_preds.extend(pred_fusion.detach().float().cpu().numpy().flatten())
-                val_labels.extend(batch["label"].detach().float().cpu().numpy().flatten())
-
-        val_preds = np.asarray(val_preds, dtype=np.float32)
-        val_labels = np.asarray(val_labels, dtype=np.float32)
-        finite_mask = np.isfinite(val_preds) & np.isfinite(val_labels)
-
-        if finite_mask.sum() < 2:
-            print("❌ Not enough valid predictions in the validation set; returning -10000")
-            return -10000.0
-
-        val_preds = val_preds[finite_mask]
-        val_labels = val_labels[finite_mask]
-
-        if np.std(val_preds) < 1e-12 or np.std(val_labels) < 1e-12:
-            pearson_corr = 0.0
-        else:
-            pearson_corr, _ = pearsonr(val_labels, val_preds)
-            if not np.isfinite(pearson_corr):
-                pearson_corr = 0.0
-
-        r2_val = r2_score(val_labels, val_preds)
-        if not np.isfinite(r2_val):
-            r2_val = -10000.0
-
         avg_train_loss = train_mse_fus / max(1, valid_train_steps)
-        avg_val_loss = val_loss_total / max(1, valid_val_steps)
-
-        print(
-            f"Epoch [{epoch + 1:02d}/{EPOCHS}] | "
-            f"Train MSE: {avg_train_loss:.4f} | "
-            f"Val MSE: {avg_val_loss:.4f} | "
-            f"Pearson: {pearson_corr:.4f} | "
-            f"R²: {r2_val:.4f}"
-        )
-
-        if r2_val > best_r2_val:
-            old_r2 = best_r2_val
-            best_r2_val = r2_val
-            state_dict = model.module.state_dict() if isinstance(model, nn.DataParallel) else model.state_dict()
-            torch.save(state_dict, temp_save_path)
-
-            if old_r2 == -10000.0:
-                print(f"      🌟 Initial best R2: {best_r2_val:.4f} (cached)")
-            else:
-                print(
-                    f"      🚀 [improvement] R² significant improvement: {old_r2:.4f} -> {best_r2_val:.4f} ！！！ "
-                    "(cached model updated)"
-                )
+        if val_loader is not None:
+            val_metrics = evaluate_regression_model(model, val_loader, DEVICE)
+            print(
+                f"Epoch [{epoch + 1:02d}/{EPOCHS}] | "
+                f"Train MSE: {avg_train_loss:.4f} | "
+                f"Val MSE: {val_metrics['mse']:.4f} | "
+                f"Pearson: {val_metrics['pearson']:.4f} | "
+                f"R²: {val_metrics['r2']:.4f}"
+            )
+        else:
+            val_metrics = None
+            print(
+                f"Epoch [{epoch + 1:02d}/{EPOCHS}] | "
+                f"Train MSE: {avg_train_loss:.4f}"
+            )
 
         gc.collect()
         if DEVICE.type == "cuda":
             torch.cuda.empty_cache()
 
-    return best_r2_val
+    state_dict = (
+        model.module.state_dict()
+        if isinstance(model, nn.DataParallel)
+        else model.state_dict()
+    )
+    torch.save(state_dict, final_model_path)
+    test_metrics = evaluate_regression_model(model, test_loader, DEVICE)
+    print(
+        f"Final test | MSE: {test_metrics['mse']:.4f} | "
+        f"Pearson: {test_metrics['pearson']:.4f} | R²: {test_metrics['r2']:.4f}"
+    )
+    return {"validation": val_metrics, "test": test_metrics}
 
 
 # ==========================================
-# 6. Multi-folder training: infer max_len for each dataset and run three repeats
+# 6. Multi-folder training: infer max_len and train each dataset once
 # ==========================================
-def run_multi_folder_grid_search(data_base_dir="Data", model_base_dir="Model"):
+def run_multi_folder_training(data_base_dir="Data", model_base_dir="Model"):
     print("\n" + "=" * 60)
     print("🚀 Starting automated multi-source training with dataset-specific max_len inference")
     print("=" * 60)
@@ -916,7 +1136,6 @@ def run_multi_folder_grid_search(data_base_dir="Data", model_base_dir="Model"):
         print(f"❌ Directory {data_base_dir} contains no subfolders.")
         return
 
-    NUM_RUNS = 3
     SEARCH_EPOCHS = 30
 
     # Choose the length strategy based on GPU memory:
@@ -959,29 +1178,10 @@ def run_multi_folder_grid_search(data_base_dir="Data", model_base_dir="Model"):
         save_dir = os.path.join(model_base_dir, folder)
         os.makedirs(save_dir, exist_ok=True)
 
-        # Merge train and dev. Note: subsequent training must use merged_train_csv.
-        merged_train_csv = os.path.join(save_dir, "merged_train.csv")
-        try:
-            df_train = pd.read_csv(train_csv)
-            if os.path.exists(dev_csv):
-                df_dev = pd.read_csv(dev_csv)
-                df_merged = pd.concat([df_train, df_dev], ignore_index=True)
-                print(f"  📎 Detected dev.csv and merged it successfully. Total merged training samples: {len(df_merged)}")
-            else:
-                df_merged = df_train
-                print(f"  ⚠️ dev.csv not found; using train.csv only. Total training samples: {len(df_merged)}")
-
-            df_merged.to_csv(merged_train_csv, index=False)
-        except Exception as e:
-            print(f"⚠️ Error while merging CSV files: {e}")
-            continue
-
-        # ================= [Infer max_len from the dataset] =================
-        # Strict setting: use only merged_train_csv for length statistics to avoid using distributional information from the test set.
-        # To avoid truncating long sequences in the test set, set csv_paths=[merged_train_csv, test_csv].
+        # Infer lengths from the training split only.
         try:
             MAX_LEN_5_AUTO, MAX_LEN_C_AUTO, MAX_LEN_3_AUTO, length_stats = infer_max_lens_from_dataset(
-                csv_paths=[merged_train_csv],
+                csv_paths=[train_csv],
                 percentile=LEN_PERCENTILE,
                 bucket_size=BUCKET_SIZE,
                 min_len_5=16,
@@ -996,142 +1196,75 @@ def run_multi_folder_grid_search(data_base_dir="Data", model_base_dir="Model"):
             print(f"⚠️ Automatic max_len inference failed: {e}")
             continue
 
-        combinations = [(MAX_LEN_5_AUTO, MAX_LEN_C_AUTO, MAX_LEN_3_AUTO)]
-        # ================================================================
+        l5, lc, l3 = MAX_LEN_5_AUTO, MAX_LEN_C_AUTO, MAX_LEN_3_AUTO
+        final_model_path = os.path.join(
+            save_dir,
+            f"model_5U{l5}_C{lc}_3U{l3}_final.pth",
+        )
+        print(
+            f"\n▶ Training once -> 5'UTR: {l5}, CDS: {lc}, 3'UTR: {l3}"
+        )
 
-        best_global_r2 = -10000.0
-        best_combo = None
-        best_model_path = None
-        results_log = []
-
-        for idx, (l5, lc, l3) in enumerate(combinations):
-            print(
-                f"\n▶ [{idx + 1}/{len(combinations)}] Testing length combination -> "
-                f"5'UTR: {l5}, CDS: {lc}, 3'UTR: {l3} "
-                f"(repeat training {NUM_RUNS} times)"
+        try:
+            metrics = train_master_model(
+                MAX_LEN_5=l5,
+                MAX_LEN_C=lc,
+                MAX_LEN_3=l3,
+                train_csv=train_csv,
+                val_csv=dev_csv if os.path.exists(dev_csv) else None,
+                test_csv=test_csv,
+                final_model_path=final_model_path,
+                EPOCHS=SEARCH_EPOCHS,
             )
-
-            combo_r2_list = []
-            combo_best_r2 = -10000.0
-            temp_combo_model = os.path.join(save_dir, "temp_combo_model.pth")
-
-            for run_idx in range(NUM_RUNS):
-                print(f"  --> 🏃 Starting run {run_idx + 1}/{NUM_RUNS} run...")
-                temp_run_model = os.path.join(save_dir, "temp_run_model.pth")
-
-                try:
-                    run_r2 = train_master_model(
-                        MAX_LEN_5=l5,
-                        MAX_LEN_C=lc,
-                        MAX_LEN_3=l3,
-                        train_csv=merged_train_csv,
-                        test_csv=test_csv,
-                        temp_save_path=temp_run_model,
-                        EPOCHS=SEARCH_EPOCHS,
-                    )
-
-                    combo_r2_list.append(run_r2)
-                    print(f"      [Completed] Run {run_idx + 1} runbest R2: {run_r2:.4f}\n")
-
-                    if run_r2 > combo_best_r2:
-                        combo_best_r2 = run_r2
-                        if os.path.exists(temp_run_model):
-                            if os.path.exists(temp_combo_model):
-                                os.remove(temp_combo_model)
-                            shutil.move(temp_run_model, temp_combo_model)
-                    else:
-                        if os.path.exists(temp_run_model):
-                            os.remove(temp_run_model)
-
-                except RuntimeError as e:
-                    if "out of memory" in str(e).lower():
-                        print("      ❌ CUDA out of memory. This combination will be interrupted.")
-                        combo_r2_list.append(-10000.0)
-                        break
-                    else:
-                        print(f"      ❌ RuntimeError occurred: {e}")
-                        combo_r2_list.append(-10000.0)
-
-                except Exception as e:
-                    print(f"      ❌ Unknown error occurred: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    combo_r2_list.append(-10000.0)
-
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-            valid_r2s = [r for r in combo_r2_list if r > -5000]
-            mean_r2 = np.mean(valid_r2s) if valid_r2s else -10000.0
-
-            print(
-                f"  🏁 Combination {l5}-{lc}-{l3} summary -> "
-                f"best R2: {combo_best_r2:.4f} | mean R2: {mean_r2:.4f}"
-            )
-
-            log_entry = {
-                "Dataset": folder,
-                "5UTR_Len": l5,
-                "CDS_Len": lc,
-                "3UTR_Len": l3,
-                "5UTR_Max_Raw": length_stats["5UTR"]["max"],
-                "CDS_Max_Raw": length_stats["CDS_codons"]["max"],
-                "3UTR_Max_Raw": length_stats["3UTR"]["max"],
-                "5UTR_P99": length_stats["5UTR"]["p99"],
-                "CDS_P99": length_stats["CDS_codons"]["p99"],
-                "3UTR_P99": length_stats["3UTR"]["p99"],
-                "Length_Percentile": LEN_PERCENTILE,
-            }
-
-            for i in range(NUM_RUNS):
-                if i < len(combo_r2_list):
-                    val = combo_r2_list[i]
-                    log_entry[f"Run{i + 1}_R2"] = val if val > -5000 else "OOM/Error"
-                else:
-                    log_entry[f"Run{i + 1}_R2"] = "-"
-
-            log_entry["Mean_R2"] = mean_r2
-            log_entry["Max_R2"] = combo_best_r2
-            results_log.append(log_entry)
-
-            if combo_best_r2 > best_global_r2:
-                old_global = best_global_r2
-                best_global_r2 = combo_best_r2
-                best_combo = (l5, lc, l3)
-
-                if old_global == -10000.0:
-                    print(f"  👑 {folder} sets the initial best combination {best_combo} | R²: {best_global_r2:.4f}")
-                else:
-                    print(
-                        f"  👑 {folder} produced a new global best combination {best_combo} | "
-                        f"record R2: {old_global:.4f} -> {best_global_r2:.4f}"
-                    )
-
-                if best_model_path and os.path.exists(best_model_path):
-                    os.remove(best_model_path)
-
-                new_best_path = os.path.join(
-                    save_dir,
-                    f"best_model_5U{l5}_C{lc}_3U{l3}_R2_{best_global_r2:.4f}.pth",
-                )
-                if os.path.exists(temp_combo_model):
-                    if os.path.exists(new_best_path):
-                        os.remove(new_best_path)
-                    os.rename(temp_combo_model, new_best_path)
-                    best_model_path = new_best_path
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                print("      ❌ CUDA out of memory. Dataset training was interrupted.")
             else:
-                if os.path.exists(temp_combo_model):
-                    os.remove(temp_combo_model)
+                print(f"      ❌ RuntimeError occurred: {e}")
+            continue
+        except Exception as e:
+            print(f"      ❌ Unknown error occurred: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
 
-            pd.DataFrame(results_log).to_csv(
-                os.path.join(save_dir, "search_log.csv"),
-                index=False,
-            )
+        val_metrics = metrics["validation"] or {
+            "mse": float("nan"),
+            "pearson": float("nan"),
+            "r2": float("nan"),
+        }
+        test_metrics = metrics["test"]
+        log_entry = {
+            "Dataset": folder,
+            "5UTR_Len": l5,
+            "CDS_Len": lc,
+            "3UTR_Len": l3,
+            "5UTR_Max_Raw": length_stats["5UTR"]["max"],
+            "CDS_Max_Raw": length_stats["CDS_codons"]["max"],
+            "3UTR_Max_Raw": length_stats["3UTR"]["max"],
+            "5UTR_P99": length_stats["5UTR"]["p99"],
+            "CDS_P99": length_stats["CDS_codons"]["p99"],
+            "3UTR_P99": length_stats["3UTR"]["p99"],
+            "Length_Percentile": LEN_PERCENTILE,
+            "Final_Val_MSE": val_metrics["mse"],
+            "Final_Val_Pearson": val_metrics["pearson"],
+            "Final_Val_R2": val_metrics["r2"],
+            "Final_Test_MSE": test_metrics["mse"],
+            "Final_Test_Pearson": test_metrics["pearson"],
+            "Final_Test_R2": test_metrics["r2"],
+            "Checkpoint": final_model_path,
+        }
+        pd.DataFrame([log_entry]).to_csv(
+            os.path.join(save_dir, "training_log.csv"),
+            index=False,
+        )
 
         print(f"\n✅ Folder {folder} training finished.")
-        print(f"🏆 Final selected length combination: {best_combo}, best R2 score: {best_global_r2:.4f}")
-        print(f"💾 Best model saved to: {best_model_path}")
+        print(f"💾 Final-epoch model saved to: {final_model_path}")
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     print("\n🎉 All datasets have been processed.")
 
@@ -1145,4 +1278,4 @@ if __name__ == "__main__":
     parser.add_argument("--model_base_dir", type=str, default="outputs/full_length_stability",
                         help="Directory for checkpoints and training logs.")
     args = parser.parse_args()
-    run_multi_folder_grid_search(data_base_dir=args.data_base_dir, model_base_dir=args.model_base_dir)
+    run_multi_folder_training(data_base_dir=args.data_base_dir, model_base_dir=args.model_base_dir)

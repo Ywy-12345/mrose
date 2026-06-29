@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset, ConcatDataset
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from torch.nn import MultiheadAttention, TransformerEncoder, TransformerEncoderLayer, TransformerDecoder, TransformerDecoderLayer
 import math
@@ -929,51 +929,6 @@ def calculate_sequence_lengths(file_name, vocab):
                 lengths.append(len(rna_sequence))
      
     return lengths
-class EarlyStopping:
-    def __init__(self, patience=10, verbose=False, rank=0):
-        self.patience = patience
-        self.verbose = verbose
-        self.counter = 0
-        self.best_score = None
-        self.early_stop = False
-        self.rank = rank
-        # Store the best metric for the filename
-        self.best_metrics = {}
-    def __call__(self, val_loss, model, metrics=None):
-        score = -val_loss
-        if self.best_score is None:
-            self.best_score = score
-            self.best_metrics = metrics if metrics else {}
-            self.save_checkpoint(val_loss, model)
-        elif score < self.best_score:
-            self.counter += 1
-            if self.verbose:
-                print(f'Rank {self.rank} - EarlyStopping counter: {self.counter} out of {self.patience}')
-            if self.counter >= self.patience:
-                self.early_stop = True
-        else:
-            self.best_score = score
-            self.best_metrics = metrics if metrics else {}
-            self.counter = 0
-            self.save_checkpoint(val_loss, model)
-    def save_checkpoint(self, val_loss, model):
-        '''Save the current best model'''
-        # Use the metric in the filename
-        if self.best_metrics:
-            acc = self.best_metrics.get('acc', 0)
-            auc = self.best_metrics.get('auc', 0)
-            mcc = self.best_metrics.get('mcc', 0)
-            auprc = self.best_metrics.get('auprc', 0)
-            f1 = self.best_metrics.get('f1', 0)
-            fold = self.best_metrics.get('fold', 0)
-            rep = self.best_metrics.get('rep', 0)
-            filename = f'./Model/best_model_rank_{self.rank}_Fold_{fold}_rep_{rep}_ACC_{acc:.4f}_AUC_{auc:.4f}_MCC_{mcc:.4f}_F1_{f1:.4f}_AUPRC_{auprc:.4f}.pth'
-        else:
-            filename = f'./Model/best_model_rank_{self.rank}.pth'
-           
-        torch.save(model.state_dict(), filename)
-        if self.verbose:
-            print(f'Rank {self.rank} - Test loss improved ({self.best_score:.6f} --> {val_loss:.6f}). Saving model ...')
 parser = argparse.ArgumentParser (description='Train VAE with Transformer')
 parser.add_argument ('--train_file', type=str, default = './fold_0/train.csv',help='Input CSV file')
 parser.add_argument ('--test_file', type=str, default = './fold_0/test.csv',help='Input CSV file')
@@ -1003,8 +958,8 @@ logger = setup_logging(rank, args.output_dir)
 torch.cuda.set_device(rank)
 # Initialize distributed training
 init_ddp(rank, world_size)
-# Main training loop modified to clear memory after each fold
-for j in range(1,5): # 5-fold cross-validation
+# Train every configured fold exactly once.
+for j in range(1, 5):
     logger.info(f'Rank {rank}: Starting fold {j}')
     device = torch.device(f'cuda:{rank}')
     vocab = {'<PAD>': 0,'<SOS>': 1, '<EOS>': 2, '<UNK>': 3,'A': 4, 'T': 5, 'G': 6, 'C': 7, '<CLS>': 8}
@@ -1014,145 +969,118 @@ for j in range(1,5): # 5-fold cross-validation
     val_file = './fold'+ str(j) +'/dev.fa'
     test_file = './test.fa'
    
-    # Load training and validation sets
     train_dataset = RNADataset(train_file, is_train=False)
     val_dataset = RNADataset(val_file, is_train=False)
-   
-    # Merge training and validation sets
-    combined_train_dataset = ConcatDataset([train_dataset, val_dataset])
-   
     test_dataset = RNADataset(test_file, is_train=False)
-    # Use distributed data loaders
-    train_loader = get_data_loader(combined_train_dataset, batch_size=args.batch_size,
-                                 vocab=vocab, shuffle=True, rank=rank, world_size=world_size)
-    test_loader = get_data_loader(test_dataset, batch_size=args.batch_size,
-                                vocab=vocab, shuffle=False, rank=rank, world_size=world_size)
+
+    train_loader = get_data_loader(
+        train_dataset, batch_size=args.batch_size, vocab=vocab,
+        shuffle=True, rank=rank, world_size=world_size
+    )
+    val_loader = get_data_loader(
+        val_dataset, batch_size=args.batch_size, vocab=vocab,
+        shuffle=False, rank=rank, world_size=world_size
+    )
+    test_loader = get_data_loader(
+        test_dataset, batch_size=args.batch_size, vocab=vocab,
+        shuffle=False, rank=rank, world_size=world_size
+    )
     vocab_size = len (vocab)
     initial_noise_std = 0.01
     max_noise_std = 0.1
-    # Run multiple repeated experiments within each fold
-    for i in range(5):
-        logger.info(f"Rank {rank}: Starting repetition {i} for fold {j}")
-       
-        # Clear the GPU cache
-        torch.cuda.empty_cache()
-       
-        noise_schedule = cosine_noise_schedule(initial_noise_std, max_noise_std, args.epochs)
-    
-        model = VAEWithTransformer(vocab_size, args.embed_dim, args.hidden_dim, args.latent_dim,
-                        args.num_encoder_layers, args.num_decoder_layers, args.num_heads,
-                        args.num_embeddings, args.commitment_cost, kmer_feature_dim=128)
-        
-        # Load pretrained model
-        pretrained_path = './Model/best_model_rank_2_Fold_0_rep_2_ACC_0.8468_AUC_0.8783_MCC_0.6297_F1_0.7377_AUPRC_0.7700.pth'
-        model.load_state_dict(torch.load(pretrained_path, map_location=device))
-    
-        model.to(device)
-       
-        # Wrap the model with DDP and set find_unused_parameters=True
-        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
-       
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-5, amsgrad=True)
-        #lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5], gamma=0.1)
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=5, T_mult=2, eta_min=1e-6)
-        early_stopping = EarlyStopping(patience=20, verbose=True, rank=rank)
-    
-        best_MCC = float('-inf') # Initialize the best MCC to negative infinity
-        best_model_state = None # Initialize the best model state as None
-    
-        for epoch in range(args.epochs):
-            start_time = time.time()
-            model.train()
-            total_loss = 0.0
-           
-            # Set the epoch for the sampler so data are shuffled differently each epoch
-            if world_size > 1:
-                train_loader.sampler.set_epoch(epoch)
-           
-            # Show the progress bar only on rank 0
-            #if rank == 0:
-            #    batch_iterator = tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.epochs}')
-            #else:
-            #    batch_iterator = train_loader
-               
-            for batch in train_loader:
-                src, labels, stacked_kmer_features, stacked_features = batch
-                src, labels, stacked_kmer_features, stacked_features = (
-                    src.to(device), labels.to(device), stacked_kmer_features.to(device), stacked_features.to(device)
-                )
-                targets = src
-                class_targets = torch.tensor([1 if label == 1 else 0 for label in labels], dtype=torch.float).to(device)
-                noise_std = noise_schedule(epoch)
-    
-                class_preds, logits, mu, logvar, vq_loss, denoising_loss = model(
-                    src, stacked_kmer_features, stacked_features, noise_std=noise_std
-                )
-                loss = loss_function(
-                    logits, targets, mu, logvar, vq_loss, denoising_loss, class_preds, class_targets,
-                    class_weight=1.0, beta=1.0, denoise_weight=1.0, vq_beta=1.0
-                )
-    
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-    
-                total_loss += loss.item()
-    
-            lr_scheduler.step()
-           
-            for param_group in optimizer.param_groups:
-                if param_group['lr'] < 0.000001:
-                    param_group['lr'] = 0.000001
-            end_time = time.time()
-            avg_loss = total_loss / len(train_loader)
-           
-            # Each rank prints its own training loss
-            #logger.info(f"Rank {rank} - Fold {j} Rep {i} Epoch {epoch+1}: Training Loss: {avg_loss:.4f}, "
-            # f"LR: {optimizer.param_groups[0]['lr']:.6f}, Time: {end_time-start_time:.2f}s")
-    
-            # Evaluate the model independently on each rank
-            acc, auc, auprc, f1, mcc, class_loss = evaluate_model(
-                model, test_loader, device, rank, world_size
+    noise_schedule = cosine_noise_schedule(initial_noise_std, max_noise_std, args.epochs)
+
+    model = VAEWithTransformer(
+        vocab_size, args.embed_dim, args.hidden_dim, args.latent_dim,
+        args.num_encoder_layers, args.num_decoder_layers, args.num_heads,
+        args.num_embeddings, args.commitment_cost, kmer_feature_dim=128
+    )
+    pretrained_path = './Model/best_model_rank_2_Fold_0_rep_2_ACC_0.8468_AUC_0.8783_MCC_0.6297_F1_0.7377_AUPRC_0.7700.pth'
+    model.load_state_dict(torch.load(pretrained_path, map_location=device))
+    model.to(device)
+    model = DDP(
+        model, device_ids=[rank], output_device=rank,
+        find_unused_parameters=True
+    )
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=args.learning_rate,
+        weight_decay=1e-5, amsgrad=True
+    )
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=5, T_mult=2, eta_min=1e-6
+    )
+
+    for epoch in range(args.epochs):
+        model.train()
+        total_loss = 0.0
+        if world_size > 1:
+            train_loader.sampler.set_epoch(epoch)
+
+        for batch in train_loader:
+            src, labels, stacked_kmer_features, stacked_features = batch
+            src, labels, stacked_kmer_features, stacked_features = (
+                src.to(device), labels.to(device),
+                stacked_kmer_features.to(device), stacked_features.to(device)
             )
-    
-            logger.info(f'Rank {rank} - Fold {j} Rep {i} Epoch {epoch+1}/{args.epochs} | '
-                      f'Loss: {class_loss:.4f} | ACC: {acc:.4f} | AUC: {auc:.4f} | AUPRC: {auprc:.4f} | F1: {f1:.4f} | MCC: {mcc:.4f}')
-               
-            # Update the best model state when the metric improves
-            if mcc > best_MCC:
-                best_MCC = mcc
-                best_model_state = copy.deepcopy(model.module.state_dict())
-                #logger.info(f"Rank {rank} - New best MCC: {best_MCC:.4f}")
-           
-            # Update the early-stopping call and pass the metric
-            metrics = {'acc': acc, 'auc': auc, 'mcc': mcc, 'auprc': auprc,'f1': f1,'fold': j,'rep': i}
-            early_stopping(-mcc, model.module, metrics)
-            if early_stopping.early_stop:
-                logger.info(f"Rank {rank} - Early stopping triggered")
-                break
-        
-        # Each rank saves its own best model
-        if best_model_state is not None:
-            best_model = VAEWithTransformer(vocab_size, args.embed_dim, args.hidden_dim, args.latent_dim,
-                                            args.num_encoder_layers, args.num_decoder_layers, args.num_heads,
-                                            args.num_embeddings, args.commitment_cost, kmer_feature_dim=128)
-            best_model.load_state_dict(best_model_state)
-           
-            # Save the model filename using the requested format
-            model_filename = f'./Model/rank_{rank}_fold_{j}_rep_{i}__ACC_{acc:.4f}_AUC_{auc:.4f}_MCC_{mcc:.4f}_F1_{f1:.4f}_AUPRC_{auprc:.4f}.pth'
-            torch.save(best_model.state_dict(), model_filename)
-            #logger.info(f'Rank {rank} - Saved best model for fold {j} rep {i} with ACC: {acc:.4f}, AUC: {auc:.4f}, MCC: {mcc:.4f}, AUPRC: {auprc:.4f}')
-        # Clean up resources for the current repeated experiment
-        del model, optimizer, lr_scheduler, early_stopping
-        torch.cuda.empty_cache()
-       
-        #logger.info(f"Rank {rank} - Completed repetition {i} for fold {j}")
-    # Clean up datasets and data loaders for the current fold
-    del train_dataset, val_dataset, test_dataset, combined_train_dataset
-    del train_loader, test_loader
+            targets = src
+            class_targets = torch.tensor(
+                [1 if label == 1 else 0 for label in labels],
+                dtype=torch.float,
+                device=device,
+            )
+            class_preds, logits, mu, logvar, vq_loss, denoising_loss = model(
+                src, stacked_kmer_features, stacked_features,
+                noise_std=noise_schedule(epoch)
+            )
+            loss = loss_function(
+                logits, targets, mu, logvar, vq_loss, denoising_loss,
+                class_preds, class_targets, class_weight=1.0, beta=1.0,
+                denoise_weight=1.0, vq_beta=1.0
+            )
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        lr_scheduler.step()
+        for param_group in optimizer.param_groups:
+            if param_group['lr'] < 0.000001:
+                param_group['lr'] = 0.000001
+
+        val_acc, val_auc, val_auprc, val_f1, val_mcc, val_loss = evaluate_model(
+            model, val_loader, device, rank, world_size
+        )
+        logger.info(
+            f'Rank {rank} - Fold {j} Epoch {epoch + 1}/{args.epochs} | '
+            f'Train Loss: {total_loss / len(train_loader):.4f} | '
+            f'Val Loss: {val_loss:.4f} | ACC: {val_acc:.4f} | '
+            f'AUC: {val_auc:.4f} | AUPRC: {val_auprc:.4f} | '
+            f'F1: {val_f1:.4f} | MCC: {val_mcc:.4f}'
+        )
+
+    acc, auc, auprc, f1, mcc, class_loss = evaluate_model(
+        model, test_loader, device, rank, world_size
+    )
+    if rank == 0:
+        os.makedirs('./Model', exist_ok=True)
+        model_filename = (
+            f'./Model/fold_{j}_final_ACC_{acc:.4f}_AUC_{auc:.4f}_'
+            f'MCC_{mcc:.4f}_F1_{f1:.4f}_AUPRC_{auprc:.4f}.pth'
+        )
+        torch.save(model.module.state_dict(), model_filename)
+        logger.info(
+            f'Fold {j} final epoch saved | Test Loss: {class_loss:.4f} | '
+            f'ACC: {acc:.4f} | AUC: {auc:.4f} | AUPRC: {auprc:.4f} | '
+            f'F1: {f1:.4f} | MCC: {mcc:.4f}'
+        )
+
+    dist.barrier()
+    del model, optimizer, lr_scheduler
+    del train_dataset, val_dataset, test_dataset
+    del train_loader, val_loader, test_loader
     torch.cuda.empty_cache()
-   
-    #logger.info(f"Rank {rank} - Completed fold {j}")
 # Clean up the distributed training environment
 dist.destroy_process_group()
 #logger.info(f"Rank {rank}: Training completed")
