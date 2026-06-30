@@ -1595,9 +1595,13 @@ def evaluate_model(model, data_loader, device, noise_std, max_len, codon_table, 
     
     return spearman_corr, pearson_corr, r2, rmse, mae, avg_loss
 
-def train_and_evaluate(args,train_csv,test_csv, rank, world_size, device, param_combo, trial_id, logger):
-    
-    logger.info(f"Trial {trial_id}, Rank {rank}: {param_combo}")
+def train_and_evaluate(args, train_csv, test_csv, rank, world_size, device, logger):
+
+    logger.info(
+        f"Rank {rank}: learning_rate={args.learning_rate}, embed_dim={args.embed_dim}, "
+        f"hidden_dim={args.hidden_dim}, latent_dim={args.latent_dim}, "
+        f"max_len={args.max_len}, milestones={args.milestones}"
+    )
 
     try:
         # Adjust max_len
@@ -1695,7 +1699,11 @@ def train_and_evaluate(args,train_csv,test_csv, rank, world_size, device, param_
         model = DDP(model, device_ids=[rank], find_unused_parameters=True)
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-5)
         noise_schedule = cosine_noise_schedule(initial_noise_std=0.01, max_noise_std=0.1, total_epochs=args.epochs)
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=param_combo['milestones'], gamma=0.1)
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=args.milestones,
+            gamma=0.1,
+        )
 
         # Training loop
         test_metrics = None
@@ -1704,9 +1712,9 @@ def train_and_evaluate(args,train_csv,test_csv, rank, world_size, device, param_
             total_loss = 0.0
             num_batches = 0
             #for batch in train_loader:
-            for batch in tqdm(train_loader, desc=f'Trial {trial_id} Epoch {epoch+1}/{args.epochs}'):  
-    
-                logger.info(f"Rank {rank}: Processing batch in epoch {epoch+1}, trial {trial_id}")
+            for batch in tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.epochs}'):
+
+                logger.info(f"Rank {rank}: Processing batch in epoch {epoch+1}")
                 noise_std = noise_schedule(epoch)
                 loss = train_step(
                     model, optimizer, batch, device, noise_std, args.max_len, codon_table, idx_to_char,
@@ -1742,19 +1750,21 @@ def train_and_evaluate(args,train_csv,test_csv, rank, world_size, device, param_
         if rank == 0:
             checkpoint_path = os.path.join(
                 args.output_dir,
-                f'trial_{trial_id}_final_epoch_{args.epochs}_spearman_{spearman_corr:.4f}.pth'
+                f'final_epoch_{args.epochs}_spearman_{spearman_corr:.4f}.pth'
             )
             torch.save(model.module.state_dict(), checkpoint_path)
-            logger.info(f'Trial {trial_id}: Saved final checkpoint: {checkpoint_path}')
+            logger.info(f'Saved final checkpoint: {checkpoint_path}')
 
         return spearman_corr, pearson_corr, test_loss
 
 
     except Exception as e:
-        logger.error(f"Trial {trial_id + 1}, Rank {rank}: Failed with error: {str(e)}")
+        logger.error(f"Rank {rank}: Training failed with error: {str(e)}")
         logger.error(traceback.format_exc())
         raise
-def hyperparameter_search():
+
+
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_name', type=str, default='promoter_tata', help='Input CSV file containing all splits')
     parser.add_argument('--epochs', type=int, default=20)
@@ -1762,7 +1772,12 @@ def hyperparameter_search():
     parser.add_argument('--output_dir', type=str, default='./output')
     parser.add_argument('--accum_steps', type=int, default=16)
     parser.add_argument('--num_workers', type=int, default=16)
-    parser.add_argument('--num_trials', type=int, default=3)
+    parser.add_argument('--learning_rate', type=float, default=0.0005)
+    parser.add_argument('--embed_dim', type=int, default=192)
+    parser.add_argument('--hidden_dim', type=int, default=192)
+    parser.add_argument('--latent_dim', type=int, default=384)
+    parser.add_argument('--max_len', type=int, default=768)
+    parser.add_argument('--milestones', type=int, nargs='+', default=[5, 7, 9])
     parser.add_argument('--num_encoder_layers', type=int, default=2)
     parser.add_argument('--num_decoder_layers', type=int, default=2)
     parser.add_argument('--num_heads', type=int, default=8)
@@ -1772,31 +1787,6 @@ def hyperparameter_search():
     if args.epochs <= 0 or args.epochs % 10 != 0:
         raise ValueError("--epochs must be a positive multiple of 10")
 
-    # Define hyperparameter search space
-    param_grid = {
-        'learning_rate': [0.0005],
-        'embed_dim': [192],
-        'hidden_dim': [192,384],
-        'latent_dim': [384],
-        'max_len': [768],
-        'milestones': [
-            [5, 7, 9],  # current setting
-            #[6, 12, 18],  # uniform distribution
-            #[8, 16, 22],  # back-loaded distribution
-            #[3, 8, 15],   # front-loaded distribution
-            #[2, 5, 20]   # middle-position adjustment
-        ]
-    }
-
-    '''
-    param_grid = {
-        'learning_rate': [0.0005],  # 0.001 caused instability in Trial 3
-        'embed_dim': [256],            # 64 underperformed in Trial 3
-        'hidden_dim': [256],      # All performed well, keep all
-        'latent_dim': [128],       # All performed well, keep all
-        'max_len': [64]                # 512 led to instability, 256 untested
-    }
-    '''
     # Get rank and world size
     rank = int(os.environ['LOCAL_RANK'])
     world_size = int(os.environ['WORLD_SIZE'])
@@ -1806,58 +1796,26 @@ def hyperparameter_search():
     init_ddp(rank, world_size)
 
     try:
-        # Set random seeds for reproducibility
-        '''
-        torch.manual_seed(42)
-        torch.cuda.manual_seed_all(42)
-        np.random.seed(42)
-        random.seed(42)
-        '''
-        # Generate trials on rank 0 and broadcast
-        if rank == 0:
-            keys = param_grid.keys()
-            trials = []
-            for _ in range(args.num_trials):
-                trial_params = {key: random.choice(param_grid[key]) for key in keys}
-                trials.append(trial_params)
-        else:
-            trials = None
-        trials_list = [trials]
-        dist.barrier()  # Synchronize before broadcasting
-        dist.broadcast_object_list(trials_list, src=0)
-        trials = trials_list[0]
-
-        # Log results
-        results = []
-
         # Load datasets
         train_csv = "./Data/train.csv"
         test_csv = "./Data/test.csv"
-        for trial_id, param_combo in enumerate(trials):
-            print(f"Rank {rank}: Starting trial {trial_id + 1}/{args.num_trials}: {param_combo}")
-            torch.cuda.empty_cache()
-            try:
-                # Update args with hyperparameter combination
-                args.learning_rate = param_combo['learning_rate']
-                args.embed_dim = param_combo['embed_dim']
-                args.hidden_dim = param_combo['hidden_dim']
-                args.latent_dim = param_combo['latent_dim']
-                args.max_len = param_combo['max_len']
-
-                device = torch.device(f'cuda:{rank}')
-                print(args)
-                # Run training and evaluation
-
-                spearman, pearson, test_loss = train_and_evaluate(args, train_csv,test_csv, rank, world_size, device, param_combo, trial_id + 1, logger)
-
-            except Exception as e:
-                logger.error(f"Trial {trial_id + 1}, Rank {rank}: Failed with error: {str(e)}")
-                logger.error(traceback.format_exc())
+        torch.cuda.empty_cache()
+        device = torch.device(f'cuda:{rank}')
+        print(args)
+        train_and_evaluate(
+            args,
+            train_csv,
+            test_csv,
+            rank,
+            world_size,
+            device,
+            logger,
+        )
 
     finally:
-        # Clean up DDP after all trials
+        # Clean up DDP after training
         cleanup_ddp()
 
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
-    hyperparameter_search()
+    main()

@@ -17,7 +17,6 @@ from scipy.stats import spearmanr, pearsonr
 import time
 import hashlib
 import signal
-import itertools
 import csv
 import random
 from torch.optim.lr_scheduler import ExponentialLR, CosineAnnealingLR
@@ -849,7 +848,6 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default='./Model', help='Base output directory for checkpoints')
     parser.add_argument('--accum_steps', type=int, default=1, help='Gradient accumulation steps')
     parser.add_argument('--max_len', type=int, default=64, help='Max sequence length')
-    parser.add_argument('--trial_id', type=int, default=0, help='Trial ID for saving')
     args = parser.parse_args()
     if args.epochs <= 0 or args.epochs % 10 != 0:
         raise ValueError("--epochs must be a positive multiple of 10")
@@ -885,130 +883,101 @@ if __name__ == '__main__':
     initial_noise_std = 0.01
     max_noise_std = 0.1
 
-    param_grid = {
-        'learning_rate': [0.0001],
-        'embed_dim': [128, 256],
-        'hidden_dim': [128, 256],
-        'latent_dim': [128, 256],
-    }
-    keys, values = zip(*param_grid.items())
-    combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
-    print(f"Total number of parameter combinations: {len(combinations)}（manually reduce the grid to speed up the search）")
+    writer = SummaryWriter(log_dir=f'runs/{file_prefix}')
 
-    best_spearman = -np.inf
-    best_params = None
-    best_trial_id = -1
+    model = VAEWithTransformer(
+        vocab_size=vocab_size,
+        embed_dim=args.embed_dim,
+        hidden_dim=args.hidden_dim,
+        latent_dim=args.latent_dim,
+        num_encoder_layers=args.num_encoder_layers,
+        num_decoder_layers=args.num_decoder_layers,
+        num_heads=args.num_heads,
+        num_embeddings=args.num_embeddings,
+        commitment_cost=args.commitment_cost,
+        kmer_feature_dim=128
+    ).to(device)
 
-    for trial_id, params in enumerate(combinations):
-        print(f"\n=== Starting Trial {trial_id} | parameters: {params} ===")
-        
-        # Replace the hard-coded '4.8' here with the dynamically generated base_output_dir
-        trial_dir = os.path.join(base_output_dir, f"trial_{trial_id}")
-        os.makedirs(trial_dir, exist_ok=True)
-        
-        # Add the prefix to the TensorBoard log path to distinguish runs from different datasets
-        writer = SummaryWriter(log_dir=f'runs/{file_prefix}_trial_{trial_id}')
-        
-        model = VAEWithTransformer(
-            vocab_size=vocab_size,
-            embed_dim=params['embed_dim'],
-            hidden_dim=params['hidden_dim'],
-            latent_dim=params['latent_dim'],
-            num_encoder_layers=args.num_encoder_layers,
-            num_decoder_layers=args.num_decoder_layers,
-            num_heads=args.num_heads,
-            num_embeddings=args.num_embeddings,
-            commitment_cost=args.commitment_cost,
-            kmer_feature_dim=128
-        ).to(device)
-        
-        print(f"Using GPU: {device}")
-        
-        optimizer = torch.optim.Adam(model.parameters(), lr=params['learning_rate'], weight_decay=1e-5, amsgrad=True)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1) 
-        noise_schedule = cosine_noise_schedule(initial_noise_std, max_noise_std, args.epochs)
-        trial_final_metrics = None
-        
-        for epoch in range(args.epochs):
-            model.train()
-            total_loss = 0.0
-            num_batches = 0
-            
-            for batch in train_loader:
-                src, mfe_targets, stacked_kmer_features, stacked_features = [x.to(device) for x in batch]
-                targets = src
-                noise_std = noise_schedule(epoch)
-                
-                logits, mu, logvar, mfe_preds, vq_loss, denoising_loss = model(src, stacked_kmer_features, stacked_features, noise_std=noise_std)
-                
-                if isinstance(vq_loss, torch.Tensor) and vq_loss.dim() > 0:
-                    vq_loss = vq_loss.mean()
-                if isinstance(denoising_loss, torch.Tensor) and denoising_loss.dim() > 0:
-                    denoising_loss = denoising_loss.mean()
-                
-                loss, mfe_loss, _ = loss_function(logits, targets, mu, logvar, vq_loss, denoising_loss,
-                                                  mfe_preds, mfe_targets, vocab,
-                                                  beta=1.0, mask_weight=0.1, mfe_weight=1.0,
-                                                  denoise_weight=1.0, vq_beta=1.0)
-                
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-                optimizer.step()
-                
-                total_loss += loss.item()
-                num_batches += 1
-            
-            lr_scheduler.step()
-            avg_train_loss = total_loss / num_batches
-            writer.add_scalar('Train/Loss', avg_train_loss, epoch)
-            
-            print(
-                f"Trial {trial_id} | Epoch {epoch + 1} | "
-                f"TrainLoss: {avg_train_loss:.4f}"
+    print(f"Using GPU: {device}")
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.learning_rate,
+        weight_decay=1e-5,
+        amsgrad=True,
+    )
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+    noise_schedule = cosine_noise_schedule(initial_noise_std, max_noise_std, args.epochs)
+    final_metrics = None
+
+    for epoch in range(args.epochs):
+        model.train()
+        total_loss = 0.0
+        num_batches = 0
+
+        for batch in train_loader:
+            src, mfe_targets, stacked_kmer_features, stacked_features = [x.to(device) for x in batch]
+            targets = src
+            noise_std = noise_schedule(epoch)
+
+            logits, mu, logvar, mfe_preds, vq_loss, denoising_loss = model(
+                src, stacked_kmer_features, stacked_features, noise_std=noise_std
             )
 
-            if (epoch + 1) % 10 == 0:
-                trial_final_metrics = evaluate_model(model, test_loader, vocab, device)
-                spearman_corr, pearson_corr, r2, rmse, mae, avg_mse = trial_final_metrics
-                print(
-                    f"Test at epoch {epoch + 1} | MSE: {avg_mse:.4f} | "
-                    f"Spearman: {spearman_corr:.4f} | Pearson: {pearson_corr:.4f} | "
-                    f"R²: {r2:.4f} | RMSE: {rmse:.4f} | MAE: {mae:.4f}"
-                )
-                writer.add_scalar('Test/Spearman', spearman_corr, epoch)
+            if isinstance(vq_loss, torch.Tensor) and vq_loss.dim() > 0:
+                vq_loss = vq_loss.mean()
+            if isinstance(denoising_loss, torch.Tensor) and denoising_loss.dim() > 0:
+                denoising_loss = denoising_loss.mean()
 
-        spearman_corr, pearson_corr, r2, rmse, mae, avg_mse = trial_final_metrics
-        param_str = '_'.join([f"{k}{v}" for k, v in params.items()])
-        ckpt_path = os.path.join(
-            trial_dir,
-            f"final_{param_str}_spear{spearman_corr:.4f}_pear{pearson_corr:.4f}_"
-            f"R2{r2:.4f}_RMSE{rmse:.4f}_MAE{mae:.4f}.pth",
-        )
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'params': params,
-            'spearman': spearman_corr,
-            'epoch': args.epochs,
-        }, ckpt_path)
-        print(f"Final-epoch model saved: {ckpt_path}")
+            loss, mfe_loss, _ = loss_function(
+                logits, targets, mu, logvar, vq_loss, denoising_loss,
+                mfe_preds, mfe_targets, vocab,
+                beta=1.0, mask_weight=0.1, mfe_weight=1.0,
+                denoise_weight=1.0, vq_beta=1.0,
+            )
 
-        if spearman_corr > best_spearman:
-            best_spearman = spearman_corr
-            best_params = params
-            best_trial_id = trial_id
-            
-        writer.close()
-        torch.cuda.empty_cache()
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            optimizer.step()
 
-    print("\nHyperparameter search completed.")
-    print(f"Global best Spearman: {best_spearman:.4f}")
-    print(f"Best parameter combination: {best_params}")
-    print(f"Best Trial ID: {best_trial_id}")
+            total_loss += loss.item()
+            num_batches += 1
 
-    # The best-parameter record is also saved in the corresponding dataset-specific folder
-    with open(os.path.join(base_output_dir, "best_hyperparameters.txt"), "w") as f:
-        f.write(f"Best Spearman: {best_spearman:.4f}\n")
-        f.write(f"Best Trial: {best_trial_id}\n")
-        f.write(str(best_params))
+        lr_scheduler.step()
+        avg_train_loss = total_loss / num_batches
+        writer.add_scalar('Train/Loss', avg_train_loss, epoch)
+        print(f"Epoch {epoch + 1} | TrainLoss: {avg_train_loss:.4f}")
+
+        if (epoch + 1) % 10 == 0:
+            final_metrics = evaluate_model(model, test_loader, vocab, device)
+            spearman_corr, pearson_corr, r2, rmse, mae, avg_mse = final_metrics
+            print(
+                f"Test at epoch {epoch + 1} | MSE: {avg_mse:.4f} | "
+                f"Spearman: {spearman_corr:.4f} | Pearson: {pearson_corr:.4f} | "
+                f"R²: {r2:.4f} | RMSE: {rmse:.4f} | MAE: {mae:.4f}"
+            )
+            writer.add_scalar('Test/Spearman', spearman_corr, epoch)
+
+    spearman_corr, pearson_corr, r2, rmse, mae, avg_mse = final_metrics
+    ckpt_path = os.path.join(
+        base_output_dir,
+        f"final_epoch_{args.epochs}_spear{spearman_corr:.4f}_pear{pearson_corr:.4f}_"
+        f"R2{r2:.4f}_RMSE{rmse:.4f}_MAE{mae:.4f}.pth",
+    )
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'hyperparameters': {
+            'learning_rate': args.learning_rate,
+            'embed_dim': args.embed_dim,
+            'hidden_dim': args.hidden_dim,
+            'latent_dim': args.latent_dim,
+        },
+        'spearman': spearman_corr,
+        'epoch': args.epochs,
+    }, ckpt_path)
+    print(f"Final-epoch model saved: {ckpt_path}")
+
+    writer.close()
+    torch.cuda.empty_cache()
